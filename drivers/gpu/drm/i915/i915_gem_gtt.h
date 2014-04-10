@@ -95,6 +95,7 @@ typedef uint64_t gen8_pde_t;
  */
 #define GEN8_PML4ES_PER_PML4		512
 #define GEN8_PML4E_SHIFT		39
+#define GEN8_PML4E_MASK			(GEN8_PML4ES_PER_PML4 - 1)
 #define GEN8_PDPE_SHIFT			30
 /* NB: GEN8_PDPE_MASK is untrue for 32b platforms, but it has no impact on 32b page
  * tables */
@@ -464,6 +465,14 @@ static inline uint32_t gen6_pde_index(uint32_t addr)
 	     temp = min(temp, length),					\
 	     start += temp, length -= temp)
 
+#define gen8_for_each_pml4e(pdp, pml4, start, length, temp, iter)	\
+	for (iter = gen8_pml4e_index(start);	\
+	     pdp = (pml4)->pdps[iter], length > 0 && iter < GEN8_PML4ES_PER_PML4;	\
+	     iter++,				\
+	     temp = ALIGN(start+1, 1ULL << GEN8_PML4E_SHIFT) - start,	\
+	     temp = min(temp, length),					\
+	     start += temp, length -= temp)
+
 #define gen8_for_each_pdpe(pd, pdp, start, length, temp, iter)		\
 	gen8_for_each_pdpe_e(pd, pdp, start, length, temp, iter, I915_PDPES_PER_PDP(dev))
 
@@ -484,8 +493,7 @@ static inline uint32_t gen8_pdpe_index(uint64_t address)
 
 static inline uint32_t gen8_pml4e_index(uint64_t address)
 {
-	WARN_ON(1); /* For 64B */
-	return 0;
+	return (address >> GEN8_PML4E_SHIFT) & GEN8_PML4E_MASK;
 }
 
 static inline size_t gen8_pte_count(uint64_t address, uint64_t length)
