@@ -39,6 +39,8 @@ struct drm_i915_file_private;
 typedef uint32_t gen6_pte_t;
 typedef uint64_t gen8_pte_t;
 typedef uint64_t gen8_pde_t;
+typedef uint64_t gen8_ppgtt_pdpe_t;
+typedef uint64_t gen8_ppgtt_pml4e_t;
 
 #define gtt_total_entries(gtt) ((gtt).base.total >> PAGE_SHIFT)
 
