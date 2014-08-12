@@ -651,6 +651,10 @@ static int smsc95xx_set_features(struct net_device *netdev,
 	return 0;
 }
 
+static void smsc95xx_poll_controller_fake(struct net_device *netdev)
+{
+}
+
 static int smsc95xx_ethtool_get_eeprom_len(struct net_device *net)
 {
 	return MAX_EEPROM_SIZE;
@@ -1097,6 +1101,7 @@ static const struct net_device_ops smsc95xx_netdev_ops = {
 	.ndo_do_ioctl 		= smsc95xx_ioctl,
 	.ndo_set_rx_mode	= smsc95xx_set_multicast,
 	.ndo_set_features	= smsc95xx_set_features,
+	.ndo_poll_controller = smsc95xx_poll_controller_fake,
 };
 
 static int smsc95xx_bind(struct usbnet *dev, struct usb_interface *intf)
