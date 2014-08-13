@@ -338,6 +338,10 @@ static int dm9601_set_mac_address(struct net_device *net, void *p)
 	return 0;
 }
 
+static void dm9601_poll_controller_fake(struct net_device *net)
+{
+}
+
 static const struct net_device_ops dm9601_netdev_ops = {
 	.ndo_open		= usbnet_open,
 	.ndo_stop		= usbnet_stop,
@@ -348,6 +352,7 @@ static const struct net_device_ops dm9601_netdev_ops = {
 	.ndo_do_ioctl 		= dm9601_ioctl,
 	.ndo_set_rx_mode	= dm9601_set_multicast,
 	.ndo_set_mac_address	= dm9601_set_mac_address,
+	.ndo_poll_controller = dm9601_poll_controller_fake,
 };
 
 static int dm9601_bind(struct usbnet *dev, struct usb_interface *intf)
