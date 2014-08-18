@@ -679,23 +679,20 @@ static int gen8_48b_mm_switch(struct i915_hw_ppgtt *ppgtt,
 	return gen8_write_pdp(req, 0, px_dma(&ppgtt->pml4));
 }
 
-static void gen8_ppgtt_clear_range(struct i915_address_space *vm,
-				   uint64_t start,
-				   uint64_t length,
-				   bool use_scratch)
+static void gen8_ppgtt_clear_pte_range(struct i915_address_space *vm,
+				       struct i915_page_directory_pointer *pdp,
+				       uint64_t start,
+				       uint64_t length,
+				       gen8_pte_t scratch_pte)
 {
 	struct i915_hw_ppgtt *ppgtt =
 		container_of(vm, struct i915_hw_ppgtt, base);
-	struct i915_page_directory_pointer *pdp = &ppgtt->pdp; /* FIXME: 48b */
-	gen8_pte_t *pt_vaddr, scratch_pte;
+	gen8_pte_t *pt_vaddr;
 	unsigned pdpe = start >> GEN8_PDPE_SHIFT & GEN8_PDPE_MASK;
 	unsigned pde = start >> GEN8_PDE_SHIFT & GEN8_PDE_MASK;
 	unsigned pte = start >> GEN8_PTE_SHIFT & GEN8_PTE_MASK;
 	unsigned num_entries = length >> PAGE_SHIFT;
 	unsigned last_pte, i;
-
-	scratch_pte = gen8_pte_encode(px_dma(ppgtt->base.scratch_page),
-				      I915_CACHE_LLC, use_scratch);
 
 	while (num_entries) {
 		struct i915_page_directory *pd;
@@ -735,14 +732,30 @@ static void gen8_ppgtt_clear_range(struct i915_address_space *vm,
 	}
 }
 
-static void gen8_ppgtt_insert_entries(struct i915_address_space *vm,
-				      struct sg_table *pages,
-				      uint64_t start,
-				      enum i915_cache_level cache_level, u32 unused)
+static void gen8_ppgtt_clear_range(struct i915_address_space *vm,
+				   uint64_t start,
+				   uint64_t length,
+				   bool use_scratch)
 {
 	struct i915_hw_ppgtt *ppgtt =
 		container_of(vm, struct i915_hw_ppgtt, base);
 	struct i915_page_directory_pointer *pdp = &ppgtt->pdp; /* FIXME: 48b */
+
+	gen8_pte_t scratch_pte = gen8_pte_encode(px_dma(vm->scratch_page),
+						 I915_CACHE_LLC, use_scratch);
+
+	gen8_ppgtt_clear_pte_range(vm, pdp, start, length, scratch_pte);
+}
+
+static void
+gen8_ppgtt_insert_pte_entries(struct i915_address_space *vm,
+			      struct i915_page_directory_pointer *pdp,
+			      struct sg_table *pages,
+			      uint64_t start,
+			      enum i915_cache_level cache_level)
+{
+	struct i915_hw_ppgtt *ppgtt =
+		container_of(vm, struct i915_hw_ppgtt, base);
 	gen8_pte_t *pt_vaddr;
 	unsigned pdpe = start >> GEN8_PDPE_SHIFT & GEN8_PDPE_MASK;
 	unsigned pde = start >> GEN8_PDE_SHIFT & GEN8_PDE_MASK;
@@ -774,6 +787,19 @@ static void gen8_ppgtt_insert_entries(struct i915_address_space *vm,
 
 	if (pt_vaddr)
 		kunmap_px(ppgtt, pt_vaddr);
+}
+
+static void gen8_ppgtt_insert_entries(struct i915_address_space *vm,
+				      struct sg_table *pages,
+				      uint64_t start,
+				      enum i915_cache_level cache_level,
+				      u32 unused)
+{
+	struct i915_hw_ppgtt *ppgtt =
+		container_of(vm, struct i915_hw_ppgtt, base);
+	struct i915_page_directory_pointer *pdp = &ppgtt->pdp; /* FIXME: 48b */
+
+	gen8_ppgtt_insert_pte_entries(vm, pdp, pages, start, cache_level);
 }
 
 static void gen8_free_page_tables(struct drm_device *dev,
