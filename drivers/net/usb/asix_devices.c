@@ -189,6 +189,10 @@ static int ax88172_link_reset(struct usbnet *dev)
 	return 0;
 }
 
+static void asix_poll_controller_fake(struct net_device *netdev)
+{
+}
+
 static const struct net_device_ops ax88172_netdev_ops = {
 	.ndo_open		= usbnet_open,
 	.ndo_stop		= usbnet_stop,
@@ -199,6 +203,7 @@ static const struct net_device_ops ax88172_netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_do_ioctl		= asix_ioctl,
 	.ndo_set_rx_mode	= ax88172_set_multicast,
+	.ndo_poll_controller = asix_poll_controller_fake,
 };
 
 static int ax88172_bind(struct usbnet *dev, struct usb_interface *intf)
@@ -413,6 +418,7 @@ static const struct net_device_ops ax88772_netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_do_ioctl		= asix_ioctl,
 	.ndo_set_rx_mode        = asix_set_multicast,
+	.ndo_poll_controller = asix_poll_controller_fake,
 };
 
 static int ax88772_bind(struct usbnet *dev, struct usb_interface *intf)
@@ -780,6 +786,7 @@ static const struct net_device_ops ax88178_netdev_ops = {
 	.ndo_set_rx_mode	= asix_set_multicast,
 	.ndo_do_ioctl 		= asix_ioctl,
 	.ndo_change_mtu 	= ax88178_change_mtu,
+	.ndo_poll_controller = asix_poll_controller_fake,
 };
 
 static int ax88178_bind(struct usbnet *dev, struct usb_interface *intf)

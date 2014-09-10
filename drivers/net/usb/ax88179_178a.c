@@ -955,6 +955,10 @@ static int ax88179_set_mac_addr(struct net_device *net, void *p)
 	return 0;
 }
 
+static void ax88179_poll_controller_fake(struct net_device *netdev)
+{
+}
+
 static const struct net_device_ops ax88179_netdev_ops = {
 	.ndo_open		= usbnet_open,
 	.ndo_stop		= usbnet_stop,
@@ -966,6 +970,7 @@ static const struct net_device_ops ax88179_netdev_ops = {
 	.ndo_do_ioctl		= ax88179_ioctl,
 	.ndo_set_rx_mode	= ax88179_set_multicast,
 	.ndo_set_features	= ax88179_set_features,
+	.ndo_poll_controller = ax88179_poll_controller_fake,
 };
 
 static int ax88179_check_eeprom(struct usbnet *dev)
