@@ -110,7 +110,7 @@ static int sanitize_enable_ppgtt(struct drm_device *dev, int enable_ppgtt)
 	has_full_ppgtt = INTEL_INFO(dev)->gen >= 7;
 	has_full_64bit_ppgtt = IS_ENABLED(CONFIG_X86_64) &&
 			       (IS_BROADWELL(dev) ||
-				INTEL_INFO(dev)->gen >= 9) && false; /* FIXME: 64b */
+				INTEL_INFO(dev)->gen >= 9);
 
 	if (intel_vgpu_active(dev))
 		has_full_ppgtt = false; /* emulation is too hard */
@@ -148,7 +148,7 @@ static int sanitize_enable_ppgtt(struct drm_device *dev, int enable_ppgtt)
 	}
 
 	if (INTEL_INFO(dev)->gen >= 8 && i915.enable_execlists)
-		return 2;
+		return has_full_64bit_ppgtt ? 3 : 2;
 	else
 		return has_aliasing_ppgtt ? 1 : 0;
 }
