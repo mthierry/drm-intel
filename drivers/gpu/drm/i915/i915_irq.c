@@ -3028,6 +3028,11 @@ static void i915_hangcheck_elapsed(struct work_struct *work)
 	 */
 	DISABLE_RPM_WAKEREF_ASSERTS(dev_priv);
 
+	if (INTEL_INFO(dev_priv)->gen >= 6 && I915_READ(ERROR_GEN6)) {
+		i915_handle_error(dev, false, "GPU reported a page fault");
+		I915_WRITE(ERROR_GEN6, 0);
+	}
+
 	for_each_ring(ring, dev_priv, i) {
 		u64 acthd;
 		u32 seqno;
