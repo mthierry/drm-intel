@@ -359,6 +359,8 @@ static void __intel_uncore_early_sanitize(struct drm_device *dev,
 	if (IS_GEN6(dev) || IS_GEN7(dev))
 		__raw_i915_write32(dev_priv, GTFIFODBG,
 				   __raw_i915_read32(dev_priv, GTFIFODBG));
+	if (INTEL_INFO(dev)->gen >= 6)
+		__raw_i915_write32(dev_priv, ERROR_GEN6, 0);
 
 	/* WaDisableShadowRegForCpd:chv */
 	if (IS_CHERRYVIEW(dev)) {
