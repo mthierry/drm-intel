@@ -3312,6 +3312,9 @@ int i915_vma_bind(struct i915_vma *vma, enum i915_cache_level cache_level,
 	if (WARN_ON(flags == 0))
 		return -EINVAL;
 
+	if (WARN_ON(vma->node.size == 0))
+		return -EINVAL;
+
 	bind_flags = 0;
 	if (flags & PIN_GLOBAL)
 		bind_flags |= GLOBAL_BIND;
