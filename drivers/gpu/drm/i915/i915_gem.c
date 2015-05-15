@@ -3720,6 +3720,8 @@ i915_gem_object_bind_to_vm(struct drm_i915_gem_object *obj,
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	u32 fence_alignment, unfenced_alignment;
 	u64 size, fence_size;
+	u32 search_flag = DRM_MM_SEARCH_DEFAULT;
+	u32 alloc_flag = DRM_MM_CREATE_DEFAULT;
 	u64 start =
 		flags & PIN_OFFSET_BIAS ? flags & PIN_OFFSET_MASK : 0;
 	u64 end =
@@ -3761,6 +3763,14 @@ i915_gem_object_bind_to_vm(struct drm_i915_gem_object *obj,
 						   obj->tiling_mode,
 						   false);
 		size = flags & PIN_MAPPABLE ? fence_size : obj->base.size;
+
+		if (flags & PIN_HIGH) {
+			search_flag = DRM_MM_SEARCH_BELOW;
+			alloc_flag = DRM_MM_CREATE_TOP;
+		}
+
+		if (flags & PIN_ZONE_4G)
+			end = (1ULL << 32);
 	}
 
 	if (alignment == 0)
@@ -3803,8 +3813,8 @@ search_free:
 						  size, alignment,
 						  obj->cache_level,
 						  start, end,
-						  DRM_MM_SEARCH_DEFAULT,
-						  DRM_MM_CREATE_DEFAULT);
+						  search_flag,
+						  alloc_flag);
 	if (ret) {
 		ret = i915_gem_evict_something(dev, vm, size, alignment,
 					       obj->cache_level,
