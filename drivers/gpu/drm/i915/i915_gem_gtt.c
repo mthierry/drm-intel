@@ -104,9 +104,13 @@ static int sanitize_enable_ppgtt(struct drm_device *dev, int enable_ppgtt)
 {
 	bool has_aliasing_ppgtt;
 	bool has_full_ppgtt;
+	bool has_full_64bit_ppgtt;
 
 	has_aliasing_ppgtt = INTEL_INFO(dev)->gen >= 6;
 	has_full_ppgtt = INTEL_INFO(dev)->gen >= 7;
+	has_full_64bit_ppgtt = IS_ENABLED(CONFIG_X86_64) &&
+			       (IS_BROADWELL(dev) ||
+				INTEL_INFO(dev)->gen >= 9) && false; /* FIXME: 64b */
 
 	if (intel_vgpu_active(dev))
 		has_full_ppgtt = false; /* emulation is too hard */
@@ -124,6 +128,9 @@ static int sanitize_enable_ppgtt(struct drm_device *dev, int enable_ppgtt)
 
 	if (enable_ppgtt == 2 && has_full_ppgtt)
 		return 2;
+
+	if (enable_ppgtt == 3 && has_full_64bit_ppgtt)
+		return 3;
 
 #ifdef CONFIG_INTEL_IOMMU
 	/* Disable ppgtt on SNB if VT-d is on. */
@@ -557,6 +564,8 @@ static void free_pdp(struct drm_device *dev,
 		     struct i915_page_directory_pointer *pdp)
 {
 	__pdp_fini(pdp);
+	if (USES_FULL_48BIT_PPGTT(dev))
+		kfree(pdp);
 }
 
 /* Broadwell Page Directory Pointer Descriptors */
@@ -671,9 +680,6 @@ static void gen8_ppgtt_insert_entries(struct i915_address_space *vm,
 	pt_vaddr = NULL;
 
 	for_each_sg_page(pages->sgl, &sg_iter, pages->nents, 0) {
-		if (WARN_ON(pdpe >= GEN8_LEGACY_PDPES))
-			break;
-
 		if (pt_vaddr == NULL) {
 			struct i915_page_directory *pd = ppgtt->pdp.page_directory[pdpe];
 			struct i915_page_table *pt = pd->page_table[pde];
@@ -1066,14 +1072,6 @@ static int gen8_ppgtt_init(struct i915_hw_ppgtt *ppgtt)
 		return ret;
 
 	ppgtt->base.start = 0;
-	ppgtt->base.total = 1ULL << 32;
-	if (IS_ENABLED(CONFIG_X86_32))
-		/* While we have a proliferation of size_t variables
-		 * we cannot represent the full ppgtt size on 32bit,
-		 * so limit it to the same size as the GGTT (currently
-		 * 2GiB).
-		 */
-		ppgtt->base.total = to_i915(ppgtt->base.dev)->gtt.base.total;
 	ppgtt->base.cleanup = gen8_ppgtt_cleanup;
 	ppgtt->base.allocate_va_range = gen8_alloc_va_range;
 	ppgtt->base.insert_entries = gen8_ppgtt_insert_entries;
@@ -1083,10 +1081,24 @@ static int gen8_ppgtt_init(struct i915_hw_ppgtt *ppgtt)
 
 	ppgtt->switch_mm = gen8_mm_switch;
 
-	ret = __pdp_init(false, &ppgtt->pdp);
+	if (!USES_FULL_48BIT_PPGTT(ppgtt->base.dev)) {
+		ret = __pdp_init(false, &ppgtt->pdp);
 
-	if (ret)
-		goto free_scratch;
+		if (ret)
+			goto free_scratch;
+
+		ppgtt->base.total = 1ULL << 32;
+		if (IS_ENABLED(CONFIG_X86_32))
+			/* While we have a proliferation of size_t variables
+			 * we cannot represent the full ppgtt size on 32bit,
+			 * so limit it to the same size as the GGTT (currently
+			 * 2GiB).
+			 */
+			ppgtt->base.total = to_i915(ppgtt->base.dev)->gtt.base.total;
+	} else {
+		ppgtt->base.total = 1ULL << 48;
+		return -EPERM; /* Not yet implemented */
+	}
 
 	return 0;
 
