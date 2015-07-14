@@ -1269,6 +1269,17 @@ static int gen8_alloc_va_range_3lvl(struct i915_address_space *vm,
 		/* Every pd should be allocated, we just did that above. */
 		WARN_ON(!pd);
 
+		/* Check if the required page tables are already allocated /
+		 * mapped; if so, we can skip altogether the inner loop of pdes,
+		 * and move to the next page directory.
+		 */
+		if (bitmap_subset(new_page_tables + pdpe * BITS_TO_LONGS(I915_PDES),
+				  pd->used_pdes,
+				  I915_PDES)) {
+			kunmap_px(ppgtt, page_directory);
+			continue;
+		}
+
 		gen8_for_each_pde(pt, pd, pd_start, pd_len, pde) {
 			/* Same reasoning as pd */
 			WARN_ON(!pt);
