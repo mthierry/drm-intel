@@ -1318,8 +1318,8 @@ static int gen8_3lvl_alloc_va_range(struct i915_address_space *vm,
 			page_directory[pde] = gen8_pde_encode(px_dma(pt),
 							      I915_CACHE_LLC);
 			trace_i915_page_table_entry_map(&ppgtt->base, pde, pt,
-							gen8_pte_index(start),
-							gen8_pte_count(start, length),
+							gen8_pte_index(pd_start),
+							gen8_pte_count(pd_start, pd_len),
 							GEN8_PTES);
 
 			/* NB: We haven't yet mapped ptes to pages. At this
