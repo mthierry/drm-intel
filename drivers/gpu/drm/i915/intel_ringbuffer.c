@@ -955,7 +955,7 @@ static int gen9_init_workarounds(struct intel_engine_cs *ring)
 	WA_SET_BIT_MASKED(HDC_CHICKEN0, tmp);
 
 	/* WaDisableSamplerPowerBypassForSOPingPong:skl,bxt */
-	if (IS_SKYLAKE(dev) || IS_BXT_REVID(dev, 0, BXT_REVID_B0))
+	if (IS_SKYLAKE(dev) || IS_BXT_REVID(dev, 0, BXT_REVID_C0-1))
 		WA_SET_BIT_MASKED(HALF_SLICE_CHICKEN3,
 				  GEN8_SAMPLER_POWER_BYPASS_DIS);
 
@@ -1098,7 +1098,7 @@ static int bxt_init_workarounds(struct intel_engine_cs *ring)
 			  STALL_DOP_GATING_DISABLE);
 
 	/* WaDisableSbeCacheDispatchPortSharing:bxt */
-	if (IS_BXT_REVID(dev, 0, BXT_REVID_B0)) {
+	if (IS_BXT_REVID(dev, 0, BXT_REVID_C0-1)) {
 		WA_SET_BIT_MASKED(
 			GEN7_HALF_SLICE_CHICKEN1,
 			GEN7_SBE_SS_CACHE_DISPATCH_PORT_SHARING_DISABLE);
