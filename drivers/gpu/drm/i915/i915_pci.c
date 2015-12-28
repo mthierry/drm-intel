@@ -470,6 +470,7 @@ static const struct intel_device_info intel_cherryview_info = {
 	.has_csr = 1, \
 	.has_guc = 1, \
 	.has_ipc = 1, \
+	.has_trtt = 1, \
 	.ddb_size = 896
 
 #define SKL_PLATFORM \
@@ -528,6 +529,7 @@ static const struct intel_device_info intel_skylake_gt4_info = {
 	.has_snoop = true, \
 	.has_coherent_ggtt = false, \
 	.has_ipc = 1, \
+	.has_trtt = 1, \
 	GEN9_DEFAULT_PAGE_SIZES, \
 	GEN_DEFAULT_PIPEOFFSETS, \
 	IVB_CURSOR_OFFSETS, \

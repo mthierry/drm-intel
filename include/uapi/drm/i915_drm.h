@@ -1483,7 +1483,16 @@ struct drm_i915_gem_context_param {
 #define   I915_CONTEXT_DEFAULT_PRIORITY		0
 #define   I915_CONTEXT_MIN_USER_PRIORITY	-1023 /* inclusive */
 #define I915_CONTEXT_PARAM_WATCHDOG	0x7
+#define I915_CONTEXT_PARAM_TRTT		0x8
 	__u64 value;
+};
+
+struct drm_i915_gem_context_trtt_param {
+	__u64 segment_base_addr;
+	__u64 l3_table_address;
+	__u32 invd_tile_val;
+	__u32 null_tile_val;
+	__u64 rsvd1;
 };
 
 enum drm_i915_oa_format {

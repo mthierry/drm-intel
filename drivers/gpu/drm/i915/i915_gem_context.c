@@ -115,6 +115,14 @@ static void lut_close(struct i915_gem_context *ctx)
 	rcu_read_unlock();
 }
 
+static void intel_context_free_trtt(struct i915_gem_context *ctx)
+{
+	if (!ctx->trtt_info.vma)
+		return;
+
+	intel_trtt_context_destroy_vma(ctx->trtt_info.vma);
+}
+
 static void i915_gem_context_free(struct i915_gem_context *ctx)
 {
 	unsigned int n;
@@ -122,6 +130,7 @@ static void i915_gem_context_free(struct i915_gem_context *ctx)
 	lockdep_assert_held(&ctx->i915->drm.struct_mutex);
 	GEM_BUG_ON(!i915_gem_context_is_closed(ctx));
 
+	intel_context_free_trtt(ctx);
 	i915_ppgtt_put(ctx->ppgtt);
 
 	for (n = 0; n < ARRAY_SIZE(ctx->__engine); n++) {
@@ -569,6 +578,133 @@ void i915_gem_context_close(struct drm_file *file)
 	idr_destroy(&file_priv->context_idr);
 }
 
+static int
+intel_context_get_trtt(struct i915_gem_context *ctx,
+		       struct drm_i915_gem_context_param *args)
+{
+	struct drm_i915_gem_context_trtt_param trtt_params;
+	struct drm_i915_private *dev_priv = ctx->i915;
+
+	if (!HAS_TRTT(dev_priv) || !USES_FULL_48BIT_PPGTT(dev_priv)) {
+		return -ENODEV;
+	} else if (args->size < sizeof(trtt_params)) {
+		args->size = sizeof(trtt_params);
+	} else {
+		trtt_params.segment_base_addr =
+			ctx->trtt_info.segment_base_addr;
+		trtt_params.l3_table_address =
+			ctx->trtt_info.l3_table_address;
+		trtt_params.null_tile_val =
+			ctx->trtt_info.null_tile_val;
+		trtt_params.invd_tile_val =
+			ctx->trtt_info.invd_tile_val;
+
+		if (__copy_to_user(u64_to_user_ptr(args->value),
+				   &trtt_params,
+				   sizeof(trtt_params))) {
+			return -EFAULT;
+		}
+
+		args->size = sizeof(trtt_params);
+	}
+
+	return 0;
+}
+
+static int
+intel_context_set_trtt(struct i915_gem_context *ctx,
+		       struct drm_i915_gem_context_param *args)
+{
+	struct drm_i915_gem_context_trtt_param trtt_params;
+	struct i915_vma *vma;
+	struct drm_i915_private *dev_priv = ctx->i915;
+	int ret;
+
+	if (!HAS_TRTT(dev_priv) || !USES_FULL_48BIT_PPGTT(dev_priv))
+		return -ENODEV;
+	else if (i915_gem_context_use_trtt(ctx))
+		return -EEXIST;
+	else if (args->size < sizeof(trtt_params))
+		return -EINVAL;
+
+	mutex_unlock(&dev_priv->drm.struct_mutex);
+
+	if (copy_from_user(&trtt_params,
+			   u64_to_user_ptr(args->value),
+			   sizeof(trtt_params))) {
+		mutex_lock(&dev_priv->drm.struct_mutex);
+		ret = -EFAULT;
+		goto exit;
+	}
+
+	mutex_lock(&dev_priv->drm.struct_mutex);
+
+	/* Check if the setup happened from another path */
+	if (i915_gem_context_use_trtt(ctx)) {
+		ret = -EEXIST;
+		goto exit;
+	}
+
+	/* basic sanity checks for the segment location & l3 table pointer */
+	if (trtt_params.segment_base_addr & (GEN9_TRTT_SEGMENT_SIZE - 1)) {
+		DRM_DEBUG_DRIVER("segment base address not correctly aligned\n");
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	if (((trtt_params.l3_table_address + PAGE_SIZE) >=
+	      trtt_params.segment_base_addr) &&
+	     (trtt_params.l3_table_address <
+	      (trtt_params.segment_base_addr + GEN9_TRTT_SEGMENT_SIZE))) {
+		DRM_DEBUG_DRIVER("l3 table address conflicts with trtt segment\n");
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	if (trtt_params.l3_table_address & ~GEN9_TRTT_L3_GFXADDR_MASK) {
+		DRM_DEBUG_DRIVER("invalid l3 table address\n");
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	if (trtt_params.null_tile_val == trtt_params.invd_tile_val) {
+		DRM_DEBUG_DRIVER("incorrect values for null & invalid tiles\n");
+		return -EINVAL;
+	}
+
+	if (trtt_params.segment_base_addr > ctx->ppgtt->vm.total ||
+	    GEN9_TRTT_SEGMENT_SIZE > ctx->ppgtt->vm.total - trtt_params.segment_base_addr) {
+		DRM_DEBUG_DRIVER("segment would end outside PPGTT range\n");
+		return -EINVAL;
+	}
+
+	vma = intel_trtt_context_allocate_vma(&ctx->ppgtt->vm,
+					      trtt_params.segment_base_addr);
+	if (IS_ERR(vma)) {
+		ret = PTR_ERR(vma);
+		goto exit;
+	}
+
+	ctx->trtt_info.vma = vma;
+	ctx->trtt_info.null_tile_val = trtt_params.null_tile_val;
+	ctx->trtt_info.invd_tile_val = trtt_params.invd_tile_val;
+	ctx->trtt_info.l3_table_address = trtt_params.l3_table_address;
+	ctx->trtt_info.segment_base_addr = trtt_params.segment_base_addr;
+
+	intel_runtime_pm_get(dev_priv);
+	ret = intel_lr_rcs_context_setup_trtt(ctx);
+	intel_runtime_pm_put(dev_priv);
+	if (ret) {
+		intel_trtt_context_destroy_vma(ctx->trtt_info.vma);
+		goto exit;
+	}
+
+	i915_gem_context_set_trtt(ctx);
+
+exit:
+	return ret;
+}
+
 static struct i915_request *
 last_request_on_engine(struct i915_timeline *timeline,
 		       struct intel_engine_cs *engine)
@@ -870,7 +1006,7 @@ int i915_gem_context_getparam_ioctl(struct drm_device *dev, void *data,
 	if (!ctx)
 		return -ENOENT;
 
-	args->size = 0;
+	args->size = (args->param != I915_CONTEXT_PARAM_TRTT) ? 0 : args->size;
 	switch (args->param) {
 	case I915_CONTEXT_PARAM_BAN_PERIOD:
 		ret = -EINVAL;
@@ -897,6 +1033,9 @@ int i915_gem_context_getparam_ioctl(struct drm_device *dev, void *data,
 		break;
 	case I915_CONTEXT_PARAM_WATCHDOG:
 		ret = i915_gem_context_get_watchdog(ctx, args);
+		break;
+	case I915_CONTEXT_PARAM_TRTT:
+		ret = intel_context_get_trtt(ctx, args);
 		break;
 	default:
 		ret = -EINVAL;
@@ -975,6 +1114,9 @@ int i915_gem_context_setparam_ioctl(struct drm_device *dev, void *data,
 
 	case I915_CONTEXT_PARAM_WATCHDOG:
 		ret = i915_gem_context_set_watchdog(ctx, args);
+		break;
+	case I915_CONTEXT_PARAM_TRTT:
+		ret = intel_context_set_trtt(ctx, args);
 		break;
 	default:
 		ret = -EINVAL;

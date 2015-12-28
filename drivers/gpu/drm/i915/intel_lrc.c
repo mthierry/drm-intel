@@ -2381,6 +2381,91 @@ static int gen8_init_rcs_context(struct i915_request *rq)
 	return i915_gem_render_state_emit(rq);
 }
 
+static int gen9_init_rcs_context_trtt(struct i915_request *rq)
+{
+	u32 *cs;
+
+	cs = intel_ring_begin(rq, 2 + 2);
+	if (IS_ERR(cs))
+		return PTR_ERR(cs);
+
+	*cs++ = MI_LOAD_REGISTER_IMM(1);
+
+	*cs++ = i915_mmio_reg_offset(GEN9_TRTT_TABLE_CONTROL);
+	*cs++ = 0;
+
+	*cs++ = MI_NOOP;
+	intel_ring_advance(rq, cs);
+
+	return 0;
+}
+
+static int gen9_init_rcs_context(struct i915_request *rq)
+{
+	int ret;
+
+	/*
+	 * Explictily disable TR-TT at the start of a new context.
+	 * Otherwise on switching from a TR-TT context to a new Non TR-TT
+	 * context the TR-TT settings of the outgoing context could get
+	 * spilled on to the new incoming context as only the Ring Context
+	 * part is loaded on the first submission of a new context, due to
+	 * the setting of ENGINE_CTX_RESTORE_INHIBIT bit.
+	 */
+	ret = gen9_init_rcs_context_trtt(rq);
+	if (ret)
+		return ret;
+
+	return gen8_init_rcs_context(rq);
+}
+
+static int gen9_emit_trtt_regs(struct i915_request *rq)
+{
+	struct i915_gem_context *ctx = rq->gem_context;
+	u64 masked_l3_gfx_address =
+		ctx->trtt_info.l3_table_address & GEN9_TRTT_L3_GFXADDR_MASK;
+	u32 trva_data_value =
+		(ctx->trtt_info.segment_base_addr >> GEN9_TRTT_SEG_SIZE_SHIFT) &
+		GEN9_TRVA_DATA_MASK;
+	const int num_lri_cmds = 6;
+	u32 *cs;
+
+	/*
+	 * Emitting LRIs to update the TRTT registers is most reliable, instead
+	 * of directly updating the context image, as this will ensure that
+	 * update happens in a serialized manner for the context and also
+	 * lite-restore scenario will get handled.
+	 */
+	cs = intel_ring_begin(rq, num_lri_cmds * 2 + 2);
+	if (IS_ERR(cs))
+		return PTR_ERR(cs);
+
+	*cs++ = MI_LOAD_REGISTER_IMM(num_lri_cmds);
+
+	*cs++ = i915_mmio_reg_offset(GEN9_TRTT_L3_POINTER_DW0);
+	*cs++ = lower_32_bits(masked_l3_gfx_address);
+
+	*cs++ = i915_mmio_reg_offset(GEN9_TRTT_L3_POINTER_DW1);
+	*cs++ = upper_32_bits(masked_l3_gfx_address);
+
+	*cs++ = i915_mmio_reg_offset(GEN9_TRTT_NULL_TILE_REG);
+	*cs++ = ctx->trtt_info.null_tile_val;
+
+	*cs++ = i915_mmio_reg_offset(GEN9_TRTT_INVD_TILE_REG);
+	*cs++ = ctx->trtt_info.invd_tile_val;
+
+	*cs++ = i915_mmio_reg_offset(GEN9_TRTT_VA_MASKDATA);
+	*cs++ = GEN9_TRVA_MASK_VALUE | trva_data_value;
+
+	*cs++ = i915_mmio_reg_offset(GEN9_TRTT_TABLE_CONTROL);
+	*cs++ = GEN9_TRTT_IN_GFX_VA_SPACE | GEN9_TRTT_ENABLE;
+
+	*cs++ = MI_NOOP;
+	intel_ring_advance(rq, cs);
+
+	return 0;
+}
+
 /**
  * intel_logical_ring_cleanup() - deallocate the Engine Command Streamer
  * @engine: Engine Command Streamer.
@@ -2602,11 +2687,14 @@ int logical_render_ring_init(struct intel_engine_cs *engine)
 		engine->irq_keep_mask |= GT_RENDER_L3_PARITY_ERROR_INTERRUPT;
 
 	/* Override some for render ring. */
-	if (INTEL_GEN(dev_priv) >= 9)
+	if (INTEL_GEN(dev_priv) >= 9) {
 		engine->init_hw = gen9_init_render_ring;
-	else
+		engine->init_context = gen9_init_rcs_context;
+	} else {
 		engine->init_hw = gen8_init_render_ring;
-	engine->init_context = gen8_init_rcs_context;
+		engine->init_context = gen8_init_rcs_context;
+	}
+
 	engine->emit_flush = gen8_emit_flush_render;
 	engine->emit_breadcrumb = gen8_emit_breadcrumb_rcs;
 	engine->emit_breadcrumb_sz = gen8_emit_breadcrumb_rcs_sz;
@@ -2973,6 +3061,22 @@ void intel_lr_context_resume(struct drm_i915_private *dev_priv)
 			intel_ring_reset(ce->ring, 0);
 		}
 	}
+}
+
+int intel_lr_rcs_context_setup_trtt(struct i915_gem_context *ctx)
+{
+	struct intel_engine_cs *engine = ctx->i915->engine[RCS];
+	struct i915_request *rq;
+	int ret;
+
+	rq = i915_request_alloc(engine, ctx);
+	if (IS_ERR(rq))
+		return PTR_ERR(rq);
+
+	ret = gen9_emit_trtt_regs(rq);
+
+	i915_request_add(rq);
+	return ret;
 }
 
 #if IS_ENABLED(CONFIG_DRM_I915_SELFTEST)

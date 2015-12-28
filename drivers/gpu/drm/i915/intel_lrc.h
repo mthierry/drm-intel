@@ -116,4 +116,6 @@ void intel_lr_context_resume(struct drm_i915_private *dev_priv);
 
 void intel_execlists_set_default_submission(struct intel_engine_cs *engine);
 
+int intel_lr_rcs_context_setup_trtt(struct i915_gem_context *ctx);
+
 #endif /* _INTEL_LRC_H_ */
