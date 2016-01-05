@@ -301,6 +301,18 @@ static void i915_ring_error_state(struct drm_i915_error_state_buf *m,
 	err_printf(m, "  waiting: %s\n", yesno(ring->waiting));
 	err_printf(m, "  ring->head: 0x%08x\n", ring->cpu_ring_head);
 	err_printf(m, "  ring->tail: 0x%08x\n", ring->cpu_ring_tail);
+
+	if (i915.enable_execlists) {
+		int j;
+		err_printf(m, "  ring->next_context_status_buffer: 0x%d\n",
+			      ring->next_context_status_buffer);
+		err_printf(m, "  CSB Pointer: 0x%08x\n", ring->csb_ptr);
+		for (j = 0; j < GEN8_CSB_ENTRIES; j++) {
+			err_printf(m, "    Context %d Status: 0x%016llx\n",
+				           j, ring->context_status[j]);
+		}
+	}
+
 	err_printf(m, "  hangcheck: %s [%d]\n",
 		   hangcheck_action_to_str(ring->hangcheck_action),
 		   ring->hangcheck_score);
@@ -1042,6 +1054,8 @@ static void i915_gem_record_rings(struct drm_device *dev,
 		}
 
 		if (i915.enable_execlists) {
+			int j;
+
 			/* TODO: This is only a small fix to keep basic error
 			 * capture working, but we need to add more information
 			 * for it to be useful (e.g. dump the context being
@@ -1051,6 +1065,15 @@ static void i915_gem_record_rings(struct drm_device *dev,
 				rbuf = request->ctx->engine[ring->id].ringbuf;
 			else
 				rbuf = ring->default_context->engine[ring->id].ringbuf;
+
+			error->ring[i].csb_ptr = I915_READ(RING_CONTEXT_STATUS_PTR(ring));
+			error->ring[i].next_context_status_buffer = ring->next_context_status_buffer;
+			for (j = 0; j < GEN8_CSB_ENTRIES; j++) {
+				u32 status, id;
+				intel_lrc_get_context_status(ring, j, &status, &id);
+				error->ring[i].context_status[j] = ((__u64)id<<32)|(__u64)status;
+			}
+
 		} else
 			rbuf = ring->buffer;
 

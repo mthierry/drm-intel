@@ -526,6 +526,7 @@ struct drm_i915_error_state {
 		u32 cpu_ring_tail;
 
 		u32 semaphore_seqno[I915_NUM_RINGS - 1];
+		u32 semaphore_mboxes[I915_NUM_RINGS - 1];
 
 		/* Register state */
 		u32 start;
@@ -545,7 +546,11 @@ struct drm_i915_error_state {
 		u32 fault_reg;
 		u64 faddr;
 		u32 rc_psmi; /* sleep state */
-		u32 semaphore_mboxes[I915_NUM_RINGS - 1];
+
+		/* execlist state */
+		u32 csb_ptr;
+		u8 next_context_status_buffer;
+		u64 context_status[GEN8_CSB_ENTRIES];
 
 		struct drm_i915_error_object {
 			int page_count;

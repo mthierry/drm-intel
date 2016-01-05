@@ -118,4 +118,8 @@ u32 intel_execlists_ctx_id(struct drm_i915_gem_object *ctx_obj);
 void intel_lrc_irq_handler(struct intel_engine_cs *ring);
 void intel_execlists_retire_requests(struct intel_engine_cs *ring);
 
+void intel_lrc_get_context_status(struct intel_engine_cs *ring,
+				  u8 read_pointer,
+				  u32 *status, u32 *context_id);
+
 #endif /* _INTEL_LRC_H_ */
