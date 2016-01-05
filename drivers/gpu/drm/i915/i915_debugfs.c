@@ -2099,8 +2099,7 @@ static int i915_execlists(struct seq_file *m, void *data)
 			   read_pointer, write_pointer);
 
 		for (i = 0; i < GEN8_CSB_ENTRIES; i++) {
-			status = I915_READ(RING_CONTEXT_STATUS_BUF_LO(ring, i));
-			ctx_id = I915_READ(RING_CONTEXT_STATUS_BUF_HI(ring, i));
+			intel_lrc_get_context_status(ring, i, &status, &ctx_id);
 
 			seq_printf(m, "\tStatus buffer %d: 0x%08X, context: %u\n",
 				   i, status, ctx_id);
