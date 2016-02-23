@@ -62,6 +62,24 @@ static void guc_policies_init(struct guc_policies *policies)
 }
 
 /*
+ * In this macro it is highly unlikely to exceed max value but even if we did
+ * it is not an error so just throw a warning and continue. Only side effect
+ * in continuing further means some registers won't be added to save/restore
+ * list.
+ */
+#define GUC_ADD_MMIO_REG_ADS(node, reg_addr, _flags, defvalue)		\
+	do {								\
+		u32 __count = node->number_of_registers;		\
+		if (WARN_ON(__count >= GUC_REGSET_MAX_REGISTERS))	\
+			continue;					\
+		node->registers[__count].offset = reg_addr.reg;		\
+		node->registers[__count].flags = (_flags);		\
+		if (defvalue)						\
+			node->registers[__count].value = (defvalue);	\
+		node->number_of_registers++;				\
+	} while (0)
+
+/*
  * The first 80 dwords of the register state context, containing the
  * execlists and ppgtt registers.
  */
@@ -85,6 +103,7 @@ int intel_guc_ads_create(struct intel_guc *guc)
 		u8 reg_state_buffer[GUC_S3_SAVE_SPACE_PAGES * PAGE_SIZE];
 	} __packed *blob;
 	struct intel_engine_cs *engine;
+	struct i915_workarounds *workarounds = &dev_priv->workarounds;
 	enum intel_engine_id id;
 	const u32 skipped_offset = LRC_HEADER_PAGES * PAGE_SIZE;
 	const u32 skipped_size = LRC_PPHWSP_SZ * PAGE_SIZE + LR_HW_CONTEXT_SIZE;
@@ -106,6 +125,52 @@ int intel_guc_ads_create(struct intel_guc *guc)
 
 	/* MMIO reg state */
 	for_each_engine(engine, dev_priv, id) {
+		u32 i;
+		struct guc_mmio_regset *eng_reg =
+			&blob->reg_state.engine_reg[engine->guc_id];
+
+		/*
+		 * Provide a list of registers to be saved/restored during gpu
+		 * reset. This is mainly required for Media reset (aka watchdog
+		 * timeout) which is completely under the control of GuC
+		 * (resubmission of hung workload is handled inside GuC).
+		 */
+		GUC_ADD_MMIO_REG_ADS(eng_reg, RING_HWS_PGA(engine->mmio_base),
+				     GUC_REGSET_ENGINERESET |
+				     GUC_REGSET_SAVE_CURRENT_VALUE, 0);
+
+		/*
+		 * Workaround the guc issue with masked registers, instead of
+		 * asking the fw to read the current reg value, we provide the
+		 * one we expect.
+		 *
+		 * GFX_RUN_LIST_ENABLE: lrc mode on, set by engine->init_hw.
+		 * GFX_INTERRUPT_STEERING: fwd irqs to GuC (guc_interrupts_capture).
+		 */
+		GUC_ADD_MMIO_REG_ADS(eng_reg, RING_MODE_GEN7(engine),
+				     GUC_REGSET_ENGINERESET |
+				     GUC_REGSET_SAVE_DEFAULT_VALUE,
+				     I915_READ(RING_MODE_GEN7(engine)) |
+				     GFX_RUN_LIST_ENABLE |
+				     GFX_INTERRUPT_STEERING | (0xFFFF<<16));
+
+		GUC_ADD_MMIO_REG_ADS(eng_reg, RING_IMR(engine->mmio_base),
+				     GUC_REGSET_ENGINERESET |
+				     GUC_REGSET_SAVE_CURRENT_VALUE, 0);
+
+		/* ask guc to re-apply workarounds set in *_init_workarounds */
+		if (engine->id == RCS) {
+			for (i = 0; i < workarounds->guc_count; i++)
+				GUC_ADD_MMIO_REG_ADS(eng_reg,
+						     _MMIO(workarounds->guc_reg[i].addr),
+						     GUC_REGSET_ENGINERESET |
+						     GUC_REGSET_SAVE_DEFAULT_VALUE,
+						     workarounds->guc_reg[i].value);
+		}
+
+		DRM_DEBUG_DRIVER("%s register save/restore count: %u\n",
+				 engine->name, eng_reg->number_of_registers);
+
 		blob->reg_state.white_list[engine->guc_id].mmio_start =
 			i915_mmio_reg_offset(RING_FORCE_TO_NONPRIV(engine->mmio_base, 0));
 
@@ -115,9 +180,13 @@ int intel_guc_ads_create(struct intel_guc *guc)
 		 * inconsistencies with the handling of FORCE_TO_NONPRIV
 		 * registers.
 		 */
-		blob->reg_state.white_list[engine->guc_id].count = 0;
+		blob->reg_state.white_list[engine->guc_id].count =
+					GUC_MMIO_WHITE_LIST_MAX;
 
-		/* Nothing to be saved or restored for now. */
+		for (i = 0; i < GUC_MMIO_WHITE_LIST_MAX; i++) {
+			blob->reg_state.white_list[engine->guc_id].offsets[i] =
+				I915_READ(RING_FORCE_TO_NONPRIV(engine->mmio_base, i));
+		}
 	}
 
 	/*

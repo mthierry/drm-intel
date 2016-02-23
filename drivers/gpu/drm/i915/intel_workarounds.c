@@ -583,6 +583,31 @@ int intel_ctx_workarounds_emit(struct i915_request *rq)
 	return 0;
 }
 
+static int guc_wa_add(struct drm_i915_private *dev_priv,
+		      i915_reg_t addr, const u32 val)
+{
+	const u32 idx = dev_priv->workarounds.guc_count;
+
+	I915_WRITE(addr, val);
+	if (!dev_priv->guc.execbuf_client)
+		return 0;
+
+	if (WARN_ON(idx >= GUC_REGSET_MAX_REGISTERS))
+		return -ENOSPC;
+
+	dev_priv->workarounds.guc_reg[idx].addr = i915_mmio_reg_offset(addr);
+	/* GuC can't handle masked regs, so we store the value|mask together */
+	dev_priv->workarounds.guc_reg[idx].value = val;
+	dev_priv->workarounds.guc_count++;
+
+	return 0;
+}
+
+#define GUC_WRREST(addr, val) do { \
+		const int r = guc_wa_add(dev_priv, (addr), (val)); \
+		WARN_ON(r); \
+	} while (0)
+
 /*
  * When writing to GEN8_L3SQCREG1, first must disable DOP clock gating
  * and include a 100-clock delay before and after the L3SQ change.
@@ -622,16 +647,16 @@ static void chv_gt_workarounds_apply(struct drm_i915_private *dev_priv)
 static void gen9_gt_workarounds_apply(struct drm_i915_private *dev_priv)
 {
 	/* WaContextSwitchWithConcurrentTLBInvalidate:skl,bxt,kbl,glk,cfl */
-	I915_WRITE(GEN9_CSFE_CHICKEN1_RCS,
+	GUC_WRREST(GEN9_CSFE_CHICKEN1_RCS,
 		   _MASKED_BIT_ENABLE(GEN9_PREEMPT_GPGPU_SYNC_SWITCH_DISABLE));
 
 	/* WaEnableLbsSlaRetryTimerDecrement:skl,bxt,kbl,glk,cfl */
-	I915_WRITE(BDW_SCRATCH1, I915_READ(BDW_SCRATCH1) |
+	GUC_WRREST(BDW_SCRATCH1, I915_READ(BDW_SCRATCH1) |
 		   GEN9_LBS_SLA_RETRY_TIMER_DECREMENT_ENABLE);
 
 	/* WaDisableKillLogic:bxt,skl,kbl */
 	if (!IS_COFFEELAKE(dev_priv))
-		I915_WRITE(GAM_ECOCHK, I915_READ(GAM_ECOCHK) |
+		GUC_WRREST(GAM_ECOCHK, I915_READ(GAM_ECOCHK) |
 			   ECOCHK_DIS_TLB);
 
 	if (HAS_LLC(dev_priv)) {
@@ -640,14 +665,14 @@ static void gen9_gt_workarounds_apply(struct drm_i915_private *dev_priv)
 		 * Must match Display Engine. See
 		 * WaCompressedResourceDisplayNewHashMode.
 		 */
-		I915_WRITE(MMCD_MISC_CTRL,
+		GUC_WRREST(MMCD_MISC_CTRL,
 			   I915_READ(MMCD_MISC_CTRL) |
 			   MMCD_PCLA |
 			   MMCD_HOTSPOT_EN);
 	}
 
 	/* WaDisableHDCInvalidation:skl,bxt,kbl,cfl */
-	I915_WRITE(GAM_ECOCHK, I915_READ(GAM_ECOCHK) |
+	GUC_WRREST(GAM_ECOCHK, I915_READ(GAM_ECOCHK) |
 		   BDW_DISABLE_HDC_INVALIDATION);
 
 	/* WaProgramL3SqcReg1DefaultForPerf:bxt,glk */
@@ -655,11 +680,11 @@ static void gen9_gt_workarounds_apply(struct drm_i915_private *dev_priv)
 		gen8_set_l3sqc_credits(dev_priv, 62, 2);
 
 	/* WaOCLCoherentLineFlush:skl,bxt,kbl,cfl */
-	I915_WRITE(GEN8_L3SQCREG4,
+	GUC_WRREST(GEN8_L3SQCREG4,
 		   I915_READ(GEN8_L3SQCREG4) | GEN8_LQSC_FLUSH_COHERENT_LINES);
 
 	/* WaEnablePreemptionGranularityControlByUMD:skl,bxt,kbl,cfl,[cnl] */
-	I915_WRITE(GEN7_FF_SLICE_CS_CHICKEN1,
+	GUC_WRREST(GEN7_FF_SLICE_CS_CHICKEN1,
 		   _MASKED_BIT_ENABLE(GEN9_FFSC_PERCTX_PREEMPT_CTRL));
 }
 
@@ -668,16 +693,16 @@ static void skl_gt_workarounds_apply(struct drm_i915_private *dev_priv)
 	gen9_gt_workarounds_apply(dev_priv);
 
 	/* WaEnableGapsTsvCreditFix:skl */
-	I915_WRITE(GEN8_GARBCNTL,
+	GUC_WRREST(GEN8_GARBCNTL,
 		   I915_READ(GEN8_GARBCNTL) | GEN9_GAPS_TSV_CREDIT_DISABLE);
 
 	/* WaDisableGafsUnitClkGating:skl */
-	I915_WRITE(GEN7_UCGCTL4,
+	GUC_WRREST(GEN7_UCGCTL4,
 		   I915_READ(GEN7_UCGCTL4) | GEN8_EU_GAUNIT_CLOCK_GATE_DISABLE);
 
 	/* WaInPlaceDecompressionHang:skl */
 	if (IS_SKL_REVID(dev_priv, SKL_REVID_H0, REVID_FOREVER))
-		I915_WRITE(GEN9_GAMT_ECO_REG_RW_IA,
+		GUC_WRREST(GEN9_GAMT_ECO_REG_RW_IA,
 			   I915_READ(GEN9_GAMT_ECO_REG_RW_IA) |
 			   GAMT_ECO_ENABLE_IN_PLACE_DECOMPRESS);
 }
@@ -687,11 +712,11 @@ static void bxt_gt_workarounds_apply(struct drm_i915_private *dev_priv)
 	gen9_gt_workarounds_apply(dev_priv);
 
 	/* WaDisablePooledEuLoadBalancingFix:bxt */
-	I915_WRITE(FF_SLICE_CS_CHICKEN2,
+	GUC_WRREST(FF_SLICE_CS_CHICKEN2,
 		   _MASKED_BIT_ENABLE(GEN9_POOLED_EU_LOAD_BALANCING_FIX_DISABLE));
 
 	/* WaInPlaceDecompressionHang:bxt */
-	I915_WRITE(GEN9_GAMT_ECO_REG_RW_IA,
+	GUC_WRREST(GEN9_GAMT_ECO_REG_RW_IA,
 		   I915_READ(GEN9_GAMT_ECO_REG_RW_IA) |
 		   GAMT_ECO_ENABLE_IN_PLACE_DECOMPRESS);
 }
@@ -701,21 +726,21 @@ static void kbl_gt_workarounds_apply(struct drm_i915_private *dev_priv)
 	gen9_gt_workarounds_apply(dev_priv);
 
 	/* WaEnableGapsTsvCreditFix:kbl */
-	I915_WRITE(GEN8_GARBCNTL,
+	GUC_WRREST(GEN8_GARBCNTL,
 		   I915_READ(GEN8_GARBCNTL) | GEN9_GAPS_TSV_CREDIT_DISABLE);
 
 	/* WaDisableDynamicCreditSharing:kbl */
 	if (IS_KBL_REVID(dev_priv, 0, KBL_REVID_B0))
-		I915_WRITE(GAMT_CHKN_BIT_REG,
+		GUC_WRREST(GAMT_CHKN_BIT_REG,
 			   I915_READ(GAMT_CHKN_BIT_REG) |
 			   GAMT_CHKN_DISABLE_DYNAMIC_CREDIT_SHARING);
 
 	/* WaDisableGafsUnitClkGating:kbl */
-	I915_WRITE(GEN7_UCGCTL4,
+	GUC_WRREST(GEN7_UCGCTL4,
 		   I915_READ(GEN7_UCGCTL4) | GEN8_EU_GAUNIT_CLOCK_GATE_DISABLE);
 
 	/* WaInPlaceDecompressionHang:kbl */
-	I915_WRITE(GEN9_GAMT_ECO_REG_RW_IA,
+	GUC_WRREST(GEN9_GAMT_ECO_REG_RW_IA,
 		   I915_READ(GEN9_GAMT_ECO_REG_RW_IA) |
 		   GAMT_ECO_ENABLE_IN_PLACE_DECOMPRESS);
 
@@ -743,15 +768,15 @@ static void cfl_gt_workarounds_apply(struct drm_i915_private *dev_priv)
 	gen9_gt_workarounds_apply(dev_priv);
 
 	/* WaEnableGapsTsvCreditFix:cfl */
-	I915_WRITE(GEN8_GARBCNTL,
+	GUC_WRREST(GEN8_GARBCNTL,
 		   I915_READ(GEN8_GARBCNTL) | GEN9_GAPS_TSV_CREDIT_DISABLE);
 
 	/* WaDisableGafsUnitClkGating:cfl */
-	I915_WRITE(GEN7_UCGCTL4,
+	GUC_WRREST(GEN7_UCGCTL4,
 		   I915_READ(GEN7_UCGCTL4) | GEN8_EU_GAUNIT_CLOCK_GATE_DISABLE);
 
 	/* WaInPlaceDecompressionHang:cfl */
-	I915_WRITE(GEN9_GAMT_ECO_REG_RW_IA,
+	GUC_WRREST(GEN9_GAMT_ECO_REG_RW_IA,
 		   I915_READ(GEN9_GAMT_ECO_REG_RW_IA) |
 		   GAMT_ECO_ENABLE_IN_PLACE_DECOMPRESS);
 }
