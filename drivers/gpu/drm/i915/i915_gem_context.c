@@ -900,6 +900,8 @@ int i915_gem_context_reset_stats_ioctl(struct drm_device *dev,
 	struct drm_i915_private *dev_priv = to_i915(dev);
 	struct drm_i915_reset_stats *args = data;
 	struct i915_gem_context *ctx;
+	struct intel_engine_cs *engine;
+	enum intel_engine_id id;
 	int ret;
 
 	if (args->flags || args->pad)
@@ -918,10 +920,16 @@ int i915_gem_context_reset_stats_ioctl(struct drm_device *dev,
 	 * we should wrap the hangstats with a seqlock.
 	 */
 
-	if (capable(CAP_SYS_ADMIN))
+	if (capable(CAP_SYS_ADMIN)) {
 		args->reset_count = i915_reset_count(&dev_priv->gpu_error);
-	else
+		for_each_engine(engine, dev_priv, id)
+			args->reset_engine_count +=
+				i915_reset_engine_count(&dev_priv->gpu_error,
+							engine);
+	} else {
 		args->reset_count = 0;
+		args->reset_engine_count = 0;
+	}
 
 	args->batch_active = atomic_read(&ctx->guilty_count);
 	args->batch_pending = atomic_read(&ctx->active_count);
