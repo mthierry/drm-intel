@@ -117,6 +117,7 @@ struct intel_instdone {
 struct intel_engine_hangcheck {
 	u64 acthd;
 	u32 seqno;
+	u32 watchdog;
 	enum intel_engine_hangcheck_action action;
 	unsigned long action_timestamp;
 	int deadlock;
@@ -209,6 +210,11 @@ struct intel_engine_execlists {
 	 * @tasklet: softirq tasklet for bottom handler
 	 */
 	struct tasklet_struct tasklet;
+
+	/**
+	 * @watchdog_tasklet: stop counter and re-schedule hangcheck_work asap
+	 */
+	struct tasklet_struct watchdog_tasklet;
 
 	/**
 	 * @default_priolist: priority list for I915_PRIORITY_NORMAL

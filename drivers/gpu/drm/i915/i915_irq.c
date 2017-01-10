@@ -1505,6 +1505,9 @@ gen8_cs_irq_handler(struct intel_engine_cs *engine, u32 iir)
 
 	if (tasklet)
 		tasklet_hi_schedule(&engine->execlists.tasklet);
+
+	if (iir & (GT_GEN8_WATCHDOG_INTERRUPT))
+		tasklet_schedule(&engine->execlists.watchdog_tasklet);
 }
 
 static void gen8_gt_irq_ack(struct drm_i915_private *i915,
@@ -3298,7 +3301,7 @@ void i915_handle_error(struct drm_i915_private *dev_priv,
 	 */
 	if (intel_has_reset_engine(dev_priv)) {
 		for_each_engine_masked(engine, dev_priv, engine_mask, tmp) {
-			BUILD_BUG_ON(I915_RESET_MODESET >= I915_RESET_ENGINE);
+			BUILD_BUG_ON(I915_RESET_WATCHDOG >= I915_RESET_ENGINE);
 			if (test_and_set_bit(I915_RESET_ENGINE + engine->id,
 					     &dev_priv->gpu_error.flags))
 				continue;
@@ -4133,12 +4136,15 @@ static void gen8_gt_irq_postinstall(struct drm_i915_private *dev_priv)
 	uint32_t gt_interrupts[] = {
 		GT_RENDER_USER_INTERRUPT << GEN8_RCS_IRQ_SHIFT |
 			GT_CONTEXT_SWITCH_INTERRUPT << GEN8_RCS_IRQ_SHIFT |
+			GT_GEN8_WATCHDOG_INTERRUPT << GEN8_RCS_IRQ_SHIFT |
 			GT_RENDER_USER_INTERRUPT << GEN8_BCS_IRQ_SHIFT |
 			GT_CONTEXT_SWITCH_INTERRUPT << GEN8_BCS_IRQ_SHIFT,
 		GT_RENDER_USER_INTERRUPT << GEN8_VCS1_IRQ_SHIFT |
 			GT_CONTEXT_SWITCH_INTERRUPT << GEN8_VCS1_IRQ_SHIFT |
+			GT_GEN8_WATCHDOG_INTERRUPT << GEN8_VCS1_IRQ_SHIFT |
 			GT_RENDER_USER_INTERRUPT << GEN8_VCS2_IRQ_SHIFT |
-			GT_CONTEXT_SWITCH_INTERRUPT << GEN8_VCS2_IRQ_SHIFT,
+			GT_CONTEXT_SWITCH_INTERRUPT << GEN8_VCS2_IRQ_SHIFT |
+			GT_GEN8_WATCHDOG_INTERRUPT << GEN8_VCS2_IRQ_SHIFT,
 		0,
 		GT_RENDER_USER_INTERRUPT << GEN8_VECS_IRQ_SHIFT |
 			GT_CONTEXT_SWITCH_INTERRUPT << GEN8_VECS_IRQ_SHIFT
@@ -4146,6 +4152,10 @@ static void gen8_gt_irq_postinstall(struct drm_i915_private *dev_priv)
 
 	if (HAS_L3_DPF(dev_priv))
 		gt_interrupts[0] |= GT_RENDER_L3_PARITY_ERROR_INTERRUPT;
+
+	/* VECS watchdog is only available in skl+ */
+	if (INTEL_GEN(dev_priv) >= 9)
+		gt_interrupts[3] |= GT_GEN8_WATCHDOG_INTERRUPT;
 
 	dev_priv->pm_ier = 0x0;
 	dev_priv->pm_imr = ~dev_priv->pm_ier;

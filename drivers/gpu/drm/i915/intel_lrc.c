@@ -2183,6 +2183,70 @@ static int gen8_emit_flush_render(struct i915_request *request,
 	return 0;
 }
 
+/* From GEN9 onwards, all engines use the same RING_CNTR format */
+static inline u32 get_watchdog_disable(struct intel_engine_cs *engine)
+{
+	if (engine->id == RCS || INTEL_GEN(engine->i915) >= 9)
+		return GEN8_WATCHDOG_DISABLE;
+	else
+		return GEN8_XCS_WATCHDOG_DISABLE;
+}
+
+#define GEN8_WATCHDOG_1000US 0x2ee0 //XXX: Temp, replace with helper function
+static void gen8_watchdog_irq_handler(unsigned long data)
+{
+	struct intel_engine_cs *engine = (struct intel_engine_cs *)data;
+	struct drm_i915_private *dev_priv = engine->i915;
+	enum forcewake_domains fw_domains;
+	u32 current_seqno;
+
+	switch (engine->id) {
+	default:
+		MISSING_CASE(engine->id);
+		/* fall through */
+	case RCS:
+		fw_domains = FORCEWAKE_RENDER;
+		break;
+	case VCS:
+	case VCS2:
+	case VECS:
+		fw_domains = FORCEWAKE_MEDIA;
+		break;
+	}
+
+	intel_uncore_forcewake_get(dev_priv, fw_domains);
+
+	/* Stop the counter to prevent further timeout interrupts */
+	I915_WRITE_FW(RING_CNTR(engine->mmio_base), get_watchdog_disable(engine));
+
+	current_seqno = intel_engine_get_seqno(engine);
+
+	/* did the request complete after the timer expired? */
+	if (intel_engine_last_submit(engine) == current_seqno)
+		goto fw_put;
+
+	if (engine->hangcheck.watchdog == current_seqno) {
+		/* Make sure the active request will be marked as guilty */
+		engine->hangcheck.stalled = true;
+		engine->hangcheck.acthd = intel_engine_get_active_head(engine);
+		engine->hangcheck.seqno = current_seqno;
+
+		/* And try to run the hangcheck_work as soon as possible */
+		set_bit(I915_RESET_WATCHDOG, &dev_priv->gpu_error.flags);
+		queue_delayed_work(system_long_wq,
+				   &dev_priv->gpu_error.hangcheck_work,
+				   round_jiffies_up_relative(HZ));
+	} else {
+		engine->hangcheck.watchdog = current_seqno;
+		/* Re-start the counter, if really hung, it will expire again */
+		I915_WRITE_FW(RING_THRESH(engine->mmio_base), GEN8_WATCHDOG_1000US);
+		I915_WRITE_FW(RING_CNTR(engine->mmio_base), GEN8_WATCHDOG_ENABLE);
+	}
+
+fw_put:
+	intel_uncore_forcewake_put(dev_priv, fw_domains);
+}
+
 /*
  * Reserve space for 2 NOOPs at the end of each request to be
  * used as a workaround for not being allowed to do lite
@@ -2262,6 +2326,9 @@ void intel_logical_ring_cleanup(struct intel_engine_cs *engine)
 	if (WARN_ON(test_bit(TASKLET_STATE_SCHED,
 			     &engine->execlists.tasklet.state)))
 		tasklet_kill(&engine->execlists.tasklet);
+
+	if (WARN_ON(test_bit(TASKLET_STATE_SCHED, &engine->execlists.watchdog_tasklet.state)))
+		tasklet_kill(&engine->execlists.watchdog_tasklet);
 
 	dev_priv = engine->i915;
 
@@ -2356,6 +2423,22 @@ logical_ring_default_irqs(struct intel_engine_cs *engine)
 
 	engine->irq_enable_mask = GT_RENDER_USER_INTERRUPT << shift;
 	engine->irq_keep_mask = GT_CONTEXT_SWITCH_INTERRUPT << shift;
+
+	switch (engine->id) {
+	default:
+		/* BCS engine does not support hw watchdog */
+		break;
+	case RCS:
+	case VCS:
+	case VCS2:
+		engine->irq_keep_mask |= (GT_GEN8_WATCHDOG_INTERRUPT << shift);
+		break;
+	case VECS:
+		if (INTEL_GEN(engine->i915) >= 9)
+			engine->irq_keep_mask |=
+				(GT_GEN8_WATCHDOG_INTERRUPT << shift);
+		break;
+	}
 }
 
 static void
@@ -2368,6 +2451,9 @@ logical_ring_setup(struct intel_engine_cs *engine)
 
 	tasklet_init(&engine->execlists.tasklet,
 		     execlists_submission_tasklet, (unsigned long)engine);
+
+	tasklet_init(&engine->execlists.watchdog_tasklet,
+		     gen8_watchdog_irq_handler, (unsigned long)engine);
 
 	logical_ring_default_vfuncs(engine);
 	logical_ring_default_irqs(engine);
