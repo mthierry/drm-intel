@@ -472,6 +472,10 @@ struct intel_engine_cs {
 	int		(*init_context)(struct i915_request *rq);
 
 	int		(*emit_flush)(struct i915_request *request, u32 mode);
+	u32 *		(*emit_start_watchdog)(struct i915_request *rq,
+					       u32 *cs);
+	u32 *		(*emit_stop_watchdog)(struct i915_request *rq,
+					      u32 *cs);
 #define EMIT_INVALIDATE	BIT(0)
 #define EMIT_FLUSH	BIT(1)
 #define EMIT_BARRIER	(EMIT_INVALIDATE | EMIT_FLUSH)

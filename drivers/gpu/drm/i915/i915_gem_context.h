@@ -155,6 +155,10 @@ struct i915_gem_context {
 		u32 *lrc_reg_state;
 		u64 lrc_desc;
 		int pin_count;
+		/** watchdog_threshold: hw watchdog threshold value,
+		 * in clock counts
+		 */
+		u32 watchdog_threshold;
 
 		const struct intel_context_ops *ops;
 	} __engine[I915_NUM_ENGINES];

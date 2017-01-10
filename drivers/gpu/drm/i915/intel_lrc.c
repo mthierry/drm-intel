@@ -2010,7 +2010,10 @@ static int gen8_emit_bb_start(struct i915_request *rq,
 			      u64 offset, u32 len,
 			      const unsigned int flags)
 {
+	struct intel_engine_cs *engine = rq->engine;
 	u32 *cs;
+	u32 num_dwords;
+	bool watchdog_running = false;
 	int ret;
 
 	/* Don't rely in hw updating PDPs, specially in lite-restore.
@@ -2020,19 +2023,37 @@ static int gen8_emit_bb_start(struct i915_request *rq,
 	 * not idle). PML4 is allocated during ppgtt init so this is
 	 * not needed in 48-bit.*/
 	if (rq->gem_context->ppgtt &&
-	    (intel_engine_flag(rq->engine) & rq->gem_context->ppgtt->pd_dirty_rings) &&
+	    (intel_engine_flag(engine) & rq->gem_context->ppgtt->pd_dirty_rings) &&
 	    !i915_vm_is_48bit(&rq->gem_context->ppgtt->vm) &&
 	    !intel_vgpu_active(rq->i915)) {
 		ret = intel_logical_ring_emit_pdps(rq);
 		if (ret)
 			return ret;
 
-		rq->gem_context->ppgtt->pd_dirty_rings &= ~intel_engine_flag(rq->engine);
+		rq->gem_context->ppgtt->pd_dirty_rings &= ~intel_engine_flag(engine);
 	}
 
-	cs = intel_ring_begin(rq, 6);
+	/* bb_start only */
+	num_dwords = 6;
+
+	/* check if watchdog will be required */
+	if (to_intel_context(rq->gem_context, engine)->watchdog_threshold != 0) {
+		GEM_BUG_ON(!engine->emit_start_watchdog ||
+			   !engine->emit_stop_watchdog);
+
+		/* + start_watchdog (6) + stop_watchdog (4) */
+		num_dwords += 10;
+		watchdog_running = true;
+	}
+
+	cs = intel_ring_begin(rq, num_dwords);
 	if (IS_ERR(cs))
 		return PTR_ERR(cs);
+
+	if (watchdog_running) {
+		/* Start watchdog timer */
+		cs = engine->emit_start_watchdog(rq, cs);
+	}
 
 	/*
 	 * WaDisableCtxRestoreArbitration:bdw,chv
@@ -2062,8 +2083,13 @@ static int gen8_emit_bb_start(struct i915_request *rq,
 
 	*cs++ = MI_ARB_ON_OFF | MI_ARB_DISABLE;
 	*cs++ = MI_NOOP;
-	intel_ring_advance(rq, cs);
 
+	if (watchdog_running) {
+		/* Cancel watchdog timer */
+		cs = engine->emit_stop_watchdog(rq, cs);
+	}
+
+	intel_ring_advance(rq, cs);
 	return 0;
 }
 
@@ -2245,6 +2271,49 @@ static void gen8_watchdog_irq_handler(unsigned long data)
 
 fw_put:
 	intel_uncore_forcewake_put(dev_priv, fw_domains);
+}
+
+static u32 *gen8_emit_start_watchdog(struct i915_request *rq, u32 *cs)
+{
+	struct intel_engine_cs *engine = rq->engine;
+	struct i915_gem_context *ctx = rq->gem_context;
+	struct intel_context *ce = to_intel_context(ctx, engine);
+
+	/* XXX: no watchdog support in BCS engine */
+	GEM_BUG_ON(engine->id == BCS);
+
+	/*
+	 * watchdog register must never be programmed to zero. This would
+	 * cause the watchdog counter to exceed and not allow the engine to
+	 * go into IDLE state
+	 */
+	GEM_BUG_ON(ce->watchdog_threshold == 0);
+
+	/* Set counter period */
+	*cs++ = MI_LOAD_REGISTER_IMM(2);
+	*cs++ = i915_mmio_reg_offset(RING_THRESH(engine->mmio_base));
+	*cs++ = ce->watchdog_threshold;
+	/* Start counter */
+	*cs++ = i915_mmio_reg_offset(RING_CNTR(engine->mmio_base));
+	*cs++ = GEN8_WATCHDOG_ENABLE;
+	*cs++ = MI_NOOP;
+
+	return cs;
+}
+
+static u32 *gen8_emit_stop_watchdog(struct i915_request *rq, u32 *cs)
+{
+	struct intel_engine_cs *engine = rq->engine;
+
+	/* XXX: no watchdog support in BCS engine */
+	GEM_BUG_ON(engine->id == BCS);
+
+	*cs++ = MI_LOAD_REGISTER_IMM(1);
+	*cs++ = i915_mmio_reg_offset(RING_CNTR(engine->mmio_base));
+	*cs++ = get_watchdog_disable(engine);
+	*cs++ = MI_NOOP;
+
+	return cs;
 }
 
 /*
@@ -2540,6 +2609,8 @@ int logical_render_ring_init(struct intel_engine_cs *engine)
 	engine->emit_flush = gen8_emit_flush_render;
 	engine->emit_breadcrumb = gen8_emit_breadcrumb_rcs;
 	engine->emit_breadcrumb_sz = gen8_emit_breadcrumb_rcs_sz;
+	engine->emit_start_watchdog = gen8_emit_start_watchdog;
+	engine->emit_stop_watchdog = gen8_emit_stop_watchdog;
 
 	ret = intel_engine_create_scratch(engine, PAGE_SIZE);
 	if (ret)
@@ -2562,6 +2633,12 @@ int logical_render_ring_init(struct intel_engine_cs *engine)
 int logical_xcs_ring_init(struct intel_engine_cs *engine)
 {
 	logical_ring_setup(engine);
+
+	/* BCS engine does not have a watchdog-expired irq */
+	if (engine->id != BCS) {
+		engine->emit_start_watchdog = gen8_emit_start_watchdog;
+		engine->emit_stop_watchdog = gen8_emit_stop_watchdog;
+	}
 
 	return logical_ring_init(engine);
 }
