@@ -348,6 +348,11 @@ void intel_guc_init_params(struct intel_guc *guc)
 	params[GUC_CTL_DEBUG] = guc_ctl_debug_flags(guc);
 	params[GUC_CTL_CTXINFO] = guc_ctl_ctxinfo_flags(guc);
 
+	/* For watchdog (aka media reset) */
+	if (USES_GUC_SUBMISSION(dev_priv))
+		params[GUC_CTL_SHARED_DATA] =
+			intel_guc_ggtt_offset(guc, guc->shared_data);
+
 	for (i = 0; i < GUC_CTL_MAX_DWORDS; i++)
 		DRM_DEBUG_DRIVER("param[%2d] = %#x\n", i, params[i]);
 
