@@ -688,6 +688,10 @@ int i915_error_state_to_str(struct drm_i915_error_state_buf *m,
 		err_printf(m, "GuC fw version: %d.%d\n",
 			   error->guc_version >> 16,
 			   error->guc_version & 0xffff);
+		err_printf(m, "HuC loaded: %s\n", yesno(error->huc_version));
+		err_printf(m, "HuC fw version: %d.%d\n",
+			   error->huc_version >> 16,
+			   error->huc_version & 0xffff);
 	}
 
 	err_printf(m, "GT awake: %s\n", yesno(error->awake));
@@ -1739,10 +1743,15 @@ static void capture_fw_state(struct i915_gpu_state *error)
 
 	if (HAS_GUC(i915)) {
 		struct intel_guc *guc = &i915->guc;
+		struct intel_huc *huc = &i915->huc;
 
 		error->guc_version =
 			(guc->fw.major_ver_found << 16 |
 			 guc->fw.minor_ver_found);
+
+		error->huc_version =
+			(huc->fw.major_ver_found << 16 |
+			 huc->fw.minor_ver_found);
 	}
 }
 
