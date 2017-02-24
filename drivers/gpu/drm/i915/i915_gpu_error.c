@@ -677,13 +677,10 @@ int i915_error_state_to_str(struct drm_i915_error_state_buf *m,
 	err_printf(m, "IOMMU enabled?: %d\n", error->iommu);
 
 	if (HAS_CSR(dev_priv)) {
-		struct intel_csr *csr = &dev_priv->csr;
-
-		err_printf(m, "DMC loaded: %s\n",
-			   yesno(csr->dmc_payload != NULL));
+		err_printf(m, "DMC loaded: %s\n", yesno(error->dmc_version));
 		err_printf(m, "DMC fw version: %d.%d\n",
-			   CSR_VERSION_MAJOR(csr->version),
-			   CSR_VERSION_MINOR(csr->version));
+			   CSR_VERSION_MAJOR(error->dmc_version),
+			   CSR_VERSION_MINOR(error->dmc_version));
 	}
 
 	err_printf(m, "GT awake: %s\n", yesno(error->awake));
@@ -1722,6 +1719,18 @@ static void capture_reg_state(struct i915_gpu_state *error)
 	error->gam_ecochk = I915_READ(GAM_ECOCHK);
 }
 
+/* Capture all firmware related information. */
+static void capture_fw_state(struct i915_gpu_state *error)
+{
+	struct drm_i915_private *i915 = error->i915;
+
+	if (HAS_CSR(i915)) {
+		struct intel_csr *csr = &i915->csr;
+
+		error->dmc_version = csr->version;
+	}
+}
+
 static void i915_error_capture_msg(struct drm_i915_private *dev_priv,
 				   struct i915_gpu_state *error,
 				   u32 engine_mask,
@@ -1814,6 +1823,7 @@ static int capture(void *data)
 	capture_gen_state(error);
 	capture_uc_state(error);
 	capture_reg_state(error);
+	capture_fw_state(error);
 	gem_record_fences(error);
 	gem_record_rings(error);
 	capture_active_buffers(error);
