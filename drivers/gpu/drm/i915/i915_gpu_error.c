@@ -683,6 +683,13 @@ int i915_error_state_to_str(struct drm_i915_error_state_buf *m,
 			   CSR_VERSION_MINOR(error->dmc_version));
 	}
 
+	if (HAS_GUC(dev_priv)) {
+		err_printf(m, "GuC loaded: %s\n", yesno(error->guc_version));
+		err_printf(m, "GuC fw version: %d.%d\n",
+			   error->guc_version >> 16,
+			   error->guc_version & 0xffff);
+	}
+
 	err_printf(m, "GT awake: %s\n", yesno(error->awake));
 	err_printf(m, "RPM wakelock: %s\n", yesno(error->wakelock));
 	err_printf(m, "PM suspended: %s\n", yesno(error->suspended));
@@ -1728,6 +1735,14 @@ static void capture_fw_state(struct i915_gpu_state *error)
 		struct intel_csr *csr = &i915->csr;
 
 		error->dmc_version = csr->version;
+	}
+
+	if (HAS_GUC(i915)) {
+		struct intel_guc *guc = &i915->guc;
+
+		error->guc_version =
+			(guc->fw.major_ver_found << 16 |
+			 guc->fw.minor_ver_found);
 	}
 }
 
