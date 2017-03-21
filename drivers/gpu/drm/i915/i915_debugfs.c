@@ -1436,6 +1436,22 @@ static int i915_hangcheck_info(struct seq_file *m, void *unused)
 	return 0;
 }
 
+static u32 i915_watchdog_reset_count(struct drm_i915_private *dev_priv)
+{
+	struct intel_guc *guc;
+	struct guc_shared_ctx_data *data;
+	u32 guc_media_reset_count;
+
+	if (!USES_GUC_SUBMISSION(dev_priv))
+		return 0;
+
+	guc = &dev_priv->guc;
+	data = guc->shared_data_vaddr;
+	guc_media_reset_count = READ_ONCE(data->media_reset_count);
+
+	return guc_media_reset_count;
+}
+
 static int i915_reset_info(struct seq_file *m, void *unused)
 {
 	struct drm_i915_private *dev_priv = node_to_i915(m->private);
@@ -1444,6 +1460,8 @@ static int i915_reset_info(struct seq_file *m, void *unused)
 	enum intel_engine_id id;
 
 	seq_printf(m, "full gpu reset = %u\n", i915_reset_count(error));
+	seq_printf(m, "GuC watchdog/media reset = %u\n",
+		   i915_watchdog_reset_count(dev_priv));
 
 	for_each_engine(engine, dev_priv, id) {
 		seq_printf(m, "%s = %u\n", engine->name,
