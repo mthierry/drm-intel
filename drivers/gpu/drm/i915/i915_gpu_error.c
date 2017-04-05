@@ -420,10 +420,12 @@ static void error_print_context(struct drm_i915_error_state_buf *m,
 				const char *header,
 				const struct drm_i915_error_context *ctx)
 {
-	err_printf(m, "%s%s[%d] user_handle %d hw_id %d, prio %d, ban score %d%s guilty %d active %d\n",
+	err_printf(m, "%s%s[%d] user_handle %d hw_id %d, prio %d, ban score %d%s guilty %d active %d, watchdog %dus\n",
 		   header, ctx->comm, ctx->pid, ctx->handle, ctx->hw_id,
 		   ctx->sched_attr.priority, ctx->ban_score, bannable(ctx),
-		   ctx->guilty, ctx->active);
+		   ctx->guilty, ctx->active,
+		   INTEL_GEN(m->i915) >= 8 ?
+			watchdog_to_us(m->i915, ctx->watchdog_threshold) : 0);
 }
 
 static void error_print_engine(struct drm_i915_error_state_buf *m,
@@ -1401,7 +1403,8 @@ static void error_record_engine_execlists(struct intel_engine_cs *engine,
 }
 
 static void record_context(struct drm_i915_error_context *e,
-			   struct i915_gem_context *ctx)
+			   struct i915_gem_context *ctx,
+			   u32 engine_id)
 {
 	if (ctx->pid) {
 		struct task_struct *task;
@@ -1422,6 +1425,7 @@ static void record_context(struct drm_i915_error_context *e,
 	e->bannable = i915_gem_context_is_bannable(ctx);
 	e->guilty = atomic_read(&ctx->guilty_count);
 	e->active = atomic_read(&ctx->active_count);
+	e->watchdog_threshold =	ctx->__engine[engine_id].watchdog_threshold;
 }
 
 static void request_record_user_bo(struct i915_request *request,
@@ -1500,7 +1504,7 @@ static void gem_record_rings(struct i915_gpu_state *error)
 
 			ee->vm = ctx->ppgtt ? &ctx->ppgtt->vm : &ggtt->vm;
 
-			record_context(&ee->context, ctx);
+			record_context(&ee->context, ctx, engine->id);
 
 			/* We need to copy these to an anonymous buffer
 			 * as the simplest method to avoid being overwritten

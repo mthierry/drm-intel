@@ -133,6 +133,7 @@ struct i915_gpu_state {
 			int ban_score;
 			int active;
 			int guilty;
+			int watchdog_threshold;
 			bool bannable;
 			struct i915_sched_attr sched_attr;
 		} context;
