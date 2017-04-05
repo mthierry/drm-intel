@@ -1675,6 +1675,9 @@ struct drm_i915_private {
 	struct drm_i915_fence_reg fence_regs[I915_MAX_NUM_FENCES]; /* assume 965 */
 	int num_fence_regs; /* 8 on pre-965, 16 otherwise */
 
+	/* Command stream timestamp base - helps define watchdog threshold */
+	u32 cs_timestamp_base;
+
 	unsigned int fsb_freq, mem_freq, is_ddr3;
 	unsigned int skl_preferred_vco_freq;
 	unsigned int max_cdclk_freq;
@@ -3225,6 +3228,59 @@ i915_gem_context_lookup(struct drm_i915_file_private *file_priv, u32 id)
 	rcu_read_unlock();
 
 	return ctx;
+}
+
+/*
+ * BDW, CHV & SKL+ Timestamp timer resolution = 0.080 uSec,
+ * or 12500000 counts per second, or ~12 counts per microsecond.
+ *
+ * But BXT/GLK Timestamp timer resolution is different, 0.052 uSec,
+ * or 19200000 counts per second, or ~19 counts per microsecond.
+ *
+ * Future-proofing, some day it won't be as simple as just GEN & IS_LP.
+ */
+#define GEN8_TIMESTAMP_CNTS_PER_USEC 12
+#define GEN9_LP_TIMESTAMP_CNTS_PER_USEC 19
+static inline u32 cs_timestamp_in_us(struct drm_i915_private *dev_priv)
+{
+	u32 cs_timestamp_base = dev_priv->cs_timestamp_base;
+
+	if (cs_timestamp_base)
+		return cs_timestamp_base;
+
+	switch (INTEL_GEN(dev_priv)) {
+	default:
+		MISSING_CASE(INTEL_GEN(dev_priv));
+		/* fall through */
+	case 9:
+		cs_timestamp_base = IS_GEN9_LP(dev_priv) ?
+					GEN9_LP_TIMESTAMP_CNTS_PER_USEC :
+					GEN8_TIMESTAMP_CNTS_PER_USEC;
+		break;
+	case 8:
+		cs_timestamp_base = GEN8_TIMESTAMP_CNTS_PER_USEC;
+		break;
+	}
+
+	dev_priv->cs_timestamp_base = cs_timestamp_base;
+	return cs_timestamp_base;
+}
+
+static inline u32
+watchdog_to_us(struct drm_i915_private *dev_priv, u32 value_in_clock_counts)
+{
+	return value_in_clock_counts / cs_timestamp_in_us(dev_priv);
+}
+
+static inline u32
+watchdog_to_clock_counts(struct drm_i915_private *dev_priv, u64 value_in_us)
+{
+	u64 threshold = value_in_us * cs_timestamp_in_us(dev_priv);
+
+	if (overflows_type(threshold, u32))
+		return -EINVAL;
+
+	return threshold;
 }
 
 int i915_perf_open_ioctl(struct drm_device *dev, void *data,
