@@ -3387,13 +3387,24 @@ static int i915_shared_dplls_info(struct seq_file *m, void *unused)
 
 static int i915_wa_registers(struct seq_file *m, void *unused)
 {
+	struct drm_i915_private *dev_priv = node_to_i915(m->private);
 	struct i915_workarounds *wa = &node_to_i915(m->private)->workarounds;
+	struct intel_engine_cs *engine;
+	enum intel_engine_id id;
 	int i;
 
 	seq_printf(m, "Workarounds applied: %d\n", wa->count);
 	for (i = 0; i < wa->count; ++i)
 		seq_printf(m, "0x%X: 0x%08X, mask: 0x%08X\n",
 			   wa->reg[i].addr, wa->reg[i].value, wa->reg[i].mask);
+
+	intel_runtime_pm_get(dev_priv);
+	for_each_engine(engine, dev_priv, id) {
+		for (i = 0; i < RING_MAX_NONPRIV_SLOTS; i++)
+			seq_printf(m, "\t [%d] regoffset: 0x%x\n",
+				   i, I915_READ(RING_FORCE_TO_NONPRIV(engine->mmio_base, i)));
+	}
+	intel_runtime_pm_put(dev_priv);
 
 	return 0;
 }
