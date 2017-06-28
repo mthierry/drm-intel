@@ -2073,6 +2073,11 @@ static int i915_swizzle_info(struct seq_file *m, void *data)
 {
 	struct drm_i915_private *dev_priv = node_to_i915(m->private);
 
+	if (INTEL_GEN(dev_priv) >= 9) {
+		seq_puts(m, "not supported - CPU does all the swizzling\n");
+		return 0;
+	}
+
 	intel_runtime_pm_get(dev_priv);
 
 	seq_printf(m, "bit6 swizzle for X-tiling = %s\n",
