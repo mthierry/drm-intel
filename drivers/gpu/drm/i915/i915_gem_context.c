@@ -778,7 +778,7 @@ int i915_gem_context_get_watchdog(struct i915_gem_context *ctx,
 	struct drm_i915_private *dev_priv = ctx->i915;
 	struct intel_engine_cs *engine;
 	enum intel_engine_id id;
-	u32 threshold_in_us[I915_NUM_ENGINES];
+	u32 threshold_in_us[OTHER_CLASS];
 
 	if (!dev_priv->engine[VCS]->emit_start_watchdog)
 		return -ENODEV;
@@ -786,8 +786,8 @@ int i915_gem_context_get_watchdog(struct i915_gem_context *ctx,
 	for_each_engine(engine, dev_priv, id) {
 		struct intel_context *ce = to_intel_context(ctx, engine);
 
-		threshold_in_us[id] = watchdog_to_us(dev_priv,
-						     ce->watchdog_threshold);
+		threshold_in_us[engine->class] = watchdog_to_us(dev_priv,
+								ce->watchdog_threshold);
 	}
 
 	if (__copy_to_user(u64_to_user_ptr(args->value),
@@ -812,7 +812,8 @@ int i915_gem_context_set_watchdog(struct i915_gem_context *ctx,
 	struct drm_i915_private *dev_priv = ctx->i915;
 	struct intel_engine_cs *engine;
 	enum intel_engine_id id;
-	u32 threshold[I915_NUM_ENGINES];
+	u32 i;
+	u32 threshold[OTHER_CLASS];
 
 	if (!dev_priv->engine[VCS]->emit_start_watchdog)
 		return -ENODEV;
@@ -836,14 +837,13 @@ int i915_gem_context_set_watchdog(struct i915_gem_context *ctx,
 	mutex_lock(&dev_priv->drm.struct_mutex);
 
 	/* not supported in blitter engine */
-	if (threshold[BCS] != 0)
+	if (threshold[COPY_ENGINE_CLASS] != 0)
 		return -EINVAL;
 
-	for_each_engine(engine, dev_priv, id) {
-		threshold[id] = watchdog_to_clock_counts(dev_priv,
-							 threshold[id]);
+	for (i = RENDER_CLASS; i < OTHER_CLASS; i++) {
+		threshold[i] = watchdog_to_clock_counts(dev_priv, threshold[i]);
 
-		if (threshold[id] == -EINVAL)
+		if (threshold[i] == -EINVAL)
 			return -EINVAL;
 	}
 
@@ -851,7 +851,7 @@ set_watchdog:
 	for_each_engine(engine, dev_priv, id) {
 		struct intel_context *ce = to_intel_context(ctx, engine);
 
-		ce->watchdog_threshold = threshold[id];
+		ce->watchdog_threshold = threshold[engine->class];
 	}
 
 	return 0;
