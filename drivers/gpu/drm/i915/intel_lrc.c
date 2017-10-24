@@ -888,6 +888,22 @@ reset_in_progress(const struct intel_engine_execlists *execlists)
 	return unlikely(!__tasklet_is_enabled(&execlists->tasklet));
 }
 
+#define I915_GEM_HWS_CSB_START         0x10
+#define I915_GEM_HWS_CSB_END           0x1b
+#define I915_GEM_HWS_CSB_LAST_WROTE    0x1f
+static void dump_csb(struct intel_engine_cs *engine)
+{
+	int idx;
+	for (idx = I915_GEM_HWS_CSB_START; idx < I915_GEM_HWS_CSB_END; idx+=2)
+		pr_err("BUG:\t%s: HWSP[%d] Execlist CSB[%d]: 0x%08x _ 0x%08x\n",
+			engine->name, idx, (idx-I915_GEM_HWS_CSB_START)/2,
+			intel_read_status_page(engine, idx),
+			intel_read_status_page(engine, idx+1));
+	pr_err("BUG:\t%s: HWSP[%d] csb last wrote (wr pointer): %u\n",
+		engine->name, I915_GEM_HWS_CSB_LAST_WROTE,
+		intel_read_status_page(engine, I915_GEM_HWS_CSB_LAST_WROTE));
+}
+
 static void process_csb(struct intel_engine_cs *engine)
 {
 	struct intel_engine_execlists * const execlists = &engine->execlists;
@@ -993,7 +1009,14 @@ static void process_csb(struct intel_engine_cs *engine)
 			  rq ? rq_prio(rq) : 0);
 
 		/* Check the context/desc id for this event matches */
-		GEM_DEBUG_BUG_ON(buf[2 * head + 1] != port->context_id);
+		if (buf[2 * head + 1] != port->context_id) {
+			DRM_ERROR("SHTF! head=%d, 0x%x != 0x%x, gpu.error_flags = 0x%lx\n",
+				  head, buf[2 * head + 1], port->context_id,
+				  engine->i915->gpu_error.flags);
+
+			dump_csb(engine);
+		}
+		///GEM_DEBUG_BUG_ON(buf[2 * head + 1] != port->context_id);
 
 		GEM_BUG_ON(count == 0);
 		if (--count == 0) {
