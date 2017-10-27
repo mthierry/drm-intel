@@ -26,10 +26,24 @@
 
 #if IS_ENABLED(CONFIG_DRM_I915_AUB_CRASH_DUMP)
 
+void i915_error_record_ppgtt(struct i915_gpu_state *error,
+			     struct i915_address_space *vm,
+			     int idx);
+void i915_error_free_ppgtt(struct i915_gpu_state *error, int idx);
 int i915_error_state_to_aub(struct drm_i915_error_state_buf *m,
                             const struct i915_gpu_state *error);
 
 #else
+
+static inline void i915_error_record_ppgtt(struct i915_gpu_state *error,
+					   struct i915_address_space *vm,
+					   int idx)
+{
+}
+
+static inline void i915_error_free_ppgtt(struct i915_gpu_state *error, int idx)
+{
+}
 
 static inline int i915_error_state_to_aub(struct drm_i915_error_state_buf *m,
 					  const struct i915_gpu_state *error)

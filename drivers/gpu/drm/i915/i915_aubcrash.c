@@ -40,6 +40,175 @@
  *
  */
 
+#define COPY_PX_ENTRIES(px, storage) do { \
+	u64 *vaddr; \
+	if (!storage) \
+		return -ENOMEM; \
+	vaddr = kmap_atomic(px_base(px)->page); \
+	memcpy(storage, vaddr, PAGE_SIZE); \
+	kunmap_atomic(vaddr); \
+} while (0)
+
+int record_pml4(struct drm_i915_error_pagemap_lvl *e_pml4,
+		struct i915_pml4 *pml4,
+		struct i915_page_directory_pointer *scratch_pdp,
+		bool is_48bit)
+{
+	int l3;
+
+	if (is_48bit) {
+		e_pml4->paddr = px_dma(pml4);
+		e_pml4->storage = (u64 *)__get_free_page(GFP_ATOMIC | __GFP_NOWARN);
+		COPY_PX_ENTRIES(pml4, e_pml4->storage);
+		for (l3 = 0; l3 < GEN8_PML4ES_PER_PML4; l3++)
+			if (pml4->pdps[l3] != scratch_pdp)
+				e_pml4->nxt_lvl_count++;
+	} else
+		e_pml4->nxt_lvl_count = 1;
+
+	e_pml4->nxt_lvl = kcalloc(e_pml4->nxt_lvl_count,
+				  sizeof(*e_pml4->nxt_lvl), GFP_ATOMIC);
+	if (!e_pml4->nxt_lvl) {
+		e_pml4->nxt_lvl_count = 0;
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+int record_pdp(struct drm_i915_error_pagemap_lvl *e_pdp,
+	       struct i915_page_directory_pointer *pdp,
+	       bool is_48bit)
+{
+	if (is_48bit) {
+		e_pdp->paddr = px_dma(pdp);
+		e_pdp->storage = (u64 *)__get_free_page(GFP_ATOMIC | __GFP_NOWARN);
+		COPY_PX_ENTRIES(pdp, e_pdp->storage);
+	}
+
+	e_pdp->nxt_lvl_count = pdp->used_pdpes;
+	e_pdp->nxt_lvl = kcalloc(e_pdp->nxt_lvl_count,
+				  sizeof(*e_pdp->nxt_lvl), GFP_ATOMIC);
+	if (!e_pdp->nxt_lvl) {
+		e_pdp->nxt_lvl_count = 0;
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+int record_pd(struct drm_i915_error_pagemap_lvl *e_pd,
+	      struct i915_page_directory *pd)
+{
+	e_pd->paddr = px_dma(pd);
+	e_pd->storage = (u64 *)__get_free_page(GFP_ATOMIC | __GFP_NOWARN);
+	COPY_PX_ENTRIES(pd, e_pd->storage);
+
+	e_pd->nxt_lvl_count = pd->used_pdes;
+	e_pd->nxt_lvl = kcalloc(e_pd->nxt_lvl_count,
+				sizeof(*e_pd->nxt_lvl), GFP_ATOMIC);
+	if (!e_pd->nxt_lvl) {
+		e_pd->nxt_lvl_count = 0;
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+void i915_error_record_ppgtt(struct i915_gpu_state *error,
+			     struct i915_address_space *vm,
+			     int idx)
+{
+	struct i915_hw_ppgtt *ppgtt;
+	struct drm_i915_error_pagemap_lvl *e_pml4;
+	struct i915_pml4 *pml4;
+	int l3, l2, max_lvl3, max_lvl2, i, j;
+	bool is_48bit;
+	int ret;
+
+	if (i915_is_ggtt(vm))
+		return;
+
+	ppgtt = i915_vm_to_ppgtt(vm);
+	is_48bit = i915_vm_is_48bit(&ppgtt->vm);
+	if (is_48bit) {
+		max_lvl3 = GEN8_PML4ES_PER_PML4;
+		max_lvl2 = GEN8_4LVL_PDPES;
+	} else {
+		max_lvl3 = 1;
+		max_lvl2 = GEN8_3LVL_PDPES;
+	}
+
+	/* PML4 */
+	pml4 = is_48bit? &ppgtt->pml4 : NULL;
+	e_pml4 = &error->ppgtt_pml4[idx];
+	ret = record_pml4(e_pml4, pml4, vm->scratch_pdp, is_48bit);
+	if (ret < 0)
+		return;
+
+	/* PDP */
+	for (l3 = 0, i = 0; l3 < max_lvl3; l3++) {
+		struct drm_i915_error_pagemap_lvl *e_pdp;
+		struct i915_page_directory_pointer *pdp;
+
+		pdp = is_48bit? pml4->pdps[l3] : &ppgtt->pdp;
+		if (pdp == vm->scratch_pdp)
+			continue;
+
+		e_pdp = &e_pml4->nxt_lvl[i];
+		ret = record_pdp(e_pdp, pdp, is_48bit);
+		if (ret < 0)
+			return;
+
+		/* PD */
+		for (l2 = 0, j = 0; l2 < max_lvl2; l2++) {
+			struct drm_i915_error_pagemap_lvl *e_pd;
+			struct i915_page_directory *pd;
+
+			pd = pdp->page_directory[l2];
+			if (pd == vm->scratch_pd)
+				continue;
+
+			e_pd = &e_pdp->nxt_lvl[j];
+			ret = record_pd(e_pd, pd);
+			if (ret < 0)
+				return;
+
+			if (++j == e_pdp->nxt_lvl_count)
+				break;
+		}
+
+		if (++i == e_pml4->nxt_lvl_count)
+			break;
+
+	}
+
+	/* XXX: Do I want to dump the scratch pdp/pd/pt/page? */
+	/* TODO: Support huge pages */
+}
+
+void i915_error_free_ppgtt(struct i915_gpu_state *error, int idx)
+{
+	struct drm_i915_error_pagemap_lvl *e_pml4 = &error->ppgtt_pml4[idx];
+	int i, j;
+
+	for (i = e_pml4->nxt_lvl_count - 1; i >= 0; i--) {
+		struct drm_i915_error_pagemap_lvl *e_pdp =
+			&e_pml4->nxt_lvl[i];
+
+		for (j = e_pdp->nxt_lvl_count - 1; j >= 0; j--) {
+			struct drm_i915_error_pagemap_lvl *e_pd =
+				&e_pdp->nxt_lvl[j];
+
+			free_page((unsigned long)e_pd->storage);
+			kfree(e_pd);
+		}
+		free_page((unsigned long)e_pdp->storage);
+		kfree(e_pdp);
+	}
+	free_page((unsigned long)e_pml4->storage);
+}
+
 int i915_error_state_to_aub(struct drm_i915_error_state_buf *m,
 			    const struct i915_gpu_state *error)
 {

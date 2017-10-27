@@ -192,6 +192,12 @@ struct i915_gpu_state {
 		u32 cache_level:3;
 	} *active_bo[I915_NUM_ENGINES], *pinned_bo;
 	u32 active_bo_count[I915_NUM_ENGINES], pinned_bo_count;
+	struct drm_i915_error_pagemap_lvl {
+		phys_addr_t paddr;
+		u64 *storage;
+		struct drm_i915_error_pagemap_lvl *nxt_lvl;
+		uint nxt_lvl_count;
+	} ppgtt_pml4[I915_NUM_ENGINES];
 	struct i915_address_space *active_vm[I915_NUM_ENGINES];
 };
 
