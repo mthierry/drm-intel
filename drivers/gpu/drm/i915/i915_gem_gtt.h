@@ -125,6 +125,7 @@ typedef u64 gen8_ppgtt_pml4e_t;
  * 47:39 | 38:30 | 29:21 | 20:12 |  11:0
  * PML4E | PDPE  |  PDE  |  PTE  | offset
  */
+#define GEN8_4LVL_PDPES			512
 #define GEN8_PML4ES_PER_PML4		512
 #define GEN8_PML4E_SHIFT		39
 #define GEN8_PML4E_MASK			(GEN8_PML4ES_PER_PML4 - 1)
@@ -511,7 +512,7 @@ static inline unsigned int
 i915_pdpes_per_pdp(const struct i915_address_space *vm)
 {
 	if (i915_vm_is_48bit(vm))
-		return GEN8_PML4ES_PER_PML4;
+		return GEN8_4LVL_PDPES;
 
 	return GEN8_3LVL_PDPES;
 }
