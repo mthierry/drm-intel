@@ -161,17 +161,13 @@ static void i915_error_vprintf(struct drm_i915_error_state_buf *e,
 	__i915_error_advance(e, len);
 }
 
-static void i915_error_puts(struct drm_i915_error_state_buf *e,
-			    const char *str)
+void i915_error_binary_write(struct drm_i915_error_state_buf *e,
+			     const void *data, size_t len)
 {
-	unsigned len;
-
 	if (!__i915_error_ok(e))
 		return;
 
-	len = strlen(str);
-
-	/* Seek the first printf which is hits start position */
+	/* Seek the first printf which hits start position */
 	if (e->pos < e->start) {
 		if (!__i915_error_seek(e, len))
 			return;
@@ -179,9 +175,16 @@ static void i915_error_puts(struct drm_i915_error_state_buf *e,
 
 	if (len >= e->size - e->bytes)
 		len = e->size - e->bytes - 1;
-	memcpy(e->buf + e->bytes, str, len);
+	memcpy(e->buf + e->bytes, data, len);
 
 	__i915_error_advance(e, len);
+}
+
+static void i915_error_puts(struct drm_i915_error_state_buf *e, const char *str)
+{
+	size_t len = strlen(str);
+
+	i915_error_binary_write(e, str, len);
 }
 
 #define err_printf(e, ...) i915_error_printf(e, __VA_ARGS__)
