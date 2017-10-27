@@ -30,6 +30,8 @@
 /* Execlists regs */
 #define RING_ELSP(engine)			_MMIO((engine)->mmio_base + 0x230)
 #define RING_EXECLIST_STATUS_LO(engine)		_MMIO((engine)->mmio_base + 0x234)
+#define   EL_STATUS_LAST_CTX_SWITCH_SHIFT	5
+#define   EL_STATUS_LAST_CTX_SWITCH_MASK	(0x1ff << EL_STAT_LAST_CTX_SWITCH_REASON_SHIFT)
 #define RING_EXECLIST_STATUS_HI(engine)		_MMIO((engine)->mmio_base + 0x234 + 4)
 #define RING_CONTEXT_CONTROL(engine)		_MMIO((engine)->mmio_base + 0x244)
 #define	  CTX_CTRL_INHIBIT_SYN_CTX_SWITCH	(1 << 3)
@@ -43,6 +45,16 @@
 #define RING_EXECLIST_SQ_CONTENTS(engine)	_MMIO((engine)->mmio_base + 0x510)
 #define RING_EXECLIST_CONTROL(engine)		_MMIO((engine)->mmio_base + 0x550)
 #define	  EL_CTRL_LOAD				(1 << 0)
+
+/* Context switch status */
+#define GEN8_CTX_STATUS_IDLE_ACTIVE	(1 << 0)
+#define GEN8_CTX_STATUS_PREEMPTED	(1 << 1)
+#define GEN8_CTX_STATUS_ELEMENT_SWITCH	(1 << 2)
+#define GEN8_CTX_STATUS_ACTIVE_IDLE	(1 << 3)
+#define GEN8_CTX_STATUS_COMPLETE	(1 << 4)
+#define GEN8_CTX_STATUS_LITE_RESTORE	(1 << 15)
+#define GEN8_CTX_STATUS_COMPLETED_MASK \
+	  (GEN8_CTX_STATUS_COMPLETE | GEN8_CTX_STATUS_PREEMPTED)
 
 /* The docs specify that the write pointer wraps around after 5h, "After status
  * is written out to the last available status QW at offset 5h, this pointer

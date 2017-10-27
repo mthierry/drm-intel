@@ -149,16 +149,6 @@
 #define RING_EXECLIST1_ACTIVE		(1 << 0x11)
 #define RING_EXECLIST0_ACTIVE		(1 << 0x12)
 
-#define GEN8_CTX_STATUS_IDLE_ACTIVE	(1 << 0)
-#define GEN8_CTX_STATUS_PREEMPTED	(1 << 1)
-#define GEN8_CTX_STATUS_ELEMENT_SWITCH	(1 << 2)
-#define GEN8_CTX_STATUS_ACTIVE_IDLE	(1 << 3)
-#define GEN8_CTX_STATUS_COMPLETE	(1 << 4)
-#define GEN8_CTX_STATUS_LITE_RESTORE	(1 << 15)
-
-#define GEN8_CTX_STATUS_COMPLETED_MASK \
-	 (GEN8_CTX_STATUS_COMPLETE | GEN8_CTX_STATUS_PREEMPTED)
-
 /* Typical size of the average request (2 pipecontrols and a MI_BB) */
 #define EXECLISTS_REQUEST_SIZE 64 /* bytes */
 #define WA_TAIL_DWORDS 2
