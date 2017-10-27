@@ -157,6 +157,7 @@ i915-y += dvo_ch7017.o \
 
 # Post-mortem debug and GPU hang state capture
 i915-$(CONFIG_DRM_I915_CAPTURE_ERROR) += i915_gpu_error.o
+i915-$(CONFIG_DRM_I915_AUB_CRASH_DUMP) += i915_aubcrash.o
 i915-$(CONFIG_DRM_I915_SELFTEST) += \
 	selftests/i915_random.o \
 	selftests/i915_selftest.o \

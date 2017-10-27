@@ -31,6 +31,7 @@
 #include <linux/sysfs.h>
 #include "intel_drv.h"
 #include "i915_drv.h"
+#include "i915_aubcrash.h"
 
 static inline struct drm_i915_private *kdev_minor_to_i915(struct device *kdev)
 {
@@ -512,9 +513,8 @@ static const struct attribute *vlv_attrs[] = {
 
 static ssize_t error_state_read(struct file *filp, struct kobject *kobj,
 				struct bin_attribute *attr, char *buf,
-				loff_t off, size_t count)
+				loff_t off, size_t count, bool type_aub)
 {
-
 	struct device *kdev = kobj_to_dev(kobj);
 	struct drm_i915_private *dev_priv = kdev_minor_to_i915(kdev);
 	struct drm_i915_error_state_buf error_str;
@@ -526,7 +526,11 @@ static ssize_t error_state_read(struct file *filp, struct kobject *kobj,
 		return ret;
 
 	gpu = i915_first_error_state(dev_priv);
-	ret = i915_error_state_to_str(&error_str, gpu);
+
+	if (type_aub)
+		ret = i915_error_state_to_aub(&error_str, gpu);
+	else
+		ret = i915_error_state_to_str(&error_str, gpu);
 	if (ret)
 		goto out;
 
@@ -553,11 +557,18 @@ static ssize_t error_state_write(struct file *file, struct kobject *kobj,
 	return count;
 }
 
+static ssize_t error_state_read_str(struct file *filp, struct kobject *kobj,
+				    struct bin_attribute *attr, char *buf,
+				    loff_t off, size_t count)
+{
+	return error_state_read(filp, kobj, attr, buf, off, count, false);
+}
+
 static const struct bin_attribute error_state_attr = {
 	.attr.name = "error",
 	.attr.mode = S_IRUSR | S_IWUSR,
 	.size = 0,
-	.read = error_state_read,
+	.read = error_state_read_str,
 	.write = error_state_write,
 };
 
@@ -574,6 +585,39 @@ static void i915_teardown_error_capture(struct device *kdev)
 #else
 static void i915_setup_error_capture(struct device *kdev) {}
 static void i915_teardown_error_capture(struct device *kdev) {}
+#endif
+
+#if IS_ENABLED(CONFIG_DRM_I915_AUB_CRASH_DUMP)
+
+static ssize_t error_state_read_aub(struct file *filp, struct kobject *kobj,
+				    struct bin_attribute *attr, char *buf,
+				    loff_t off, size_t count)
+{
+	return error_state_read(filp, kobj, attr, buf, off, count, true);
+}
+
+static const struct bin_attribute aub_state_attr = {
+	.attr.name = "aub",
+	.attr.mode = S_IRUSR | S_IWUSR,
+	.size = 0,
+	.read = error_state_read_aub,
+	.write = error_state_write,
+};
+
+static void i915_setup_error_capture_aub(struct device *kdev)
+{
+	if (sysfs_create_bin_file(&kdev->kobj, &aub_state_attr))
+		DRM_ERROR("aub_state sysfs setup failed\n");
+}
+
+static void i915_teardown_error_capture_aub(struct device *kdev)
+{
+	sysfs_remove_bin_file(&kdev->kobj, &aub_state_attr);
+}
+
+#else
+static void i915_setup_error_capture_aub(struct device *kdev) {}
+static void i915_teardown_error_capture_aub(struct device *kdev) {}
 #endif
 
 void i915_setup_sysfs(struct drm_i915_private *dev_priv)
@@ -623,6 +667,7 @@ void i915_setup_sysfs(struct drm_i915_private *dev_priv)
 		DRM_ERROR("RPS sysfs setup failed\n");
 
 	i915_setup_error_capture(kdev);
+	i915_setup_error_capture_aub(kdev);
 }
 
 void i915_teardown_sysfs(struct drm_i915_private *dev_priv)
@@ -630,6 +675,7 @@ void i915_teardown_sysfs(struct drm_i915_private *dev_priv)
 	struct device *kdev = dev_priv->drm.primary->kdev;
 
 	i915_teardown_error_capture(kdev);
+	i915_teardown_error_capture_aub(kdev);
 
 	if (IS_VALLEYVIEW(dev_priv) || IS_CHERRYVIEW(dev_priv))
 		sysfs_remove_files(&kdev->kobj, vlv_attrs);
