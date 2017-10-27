@@ -3057,6 +3057,7 @@ static int ggtt_probe_common(struct i915_ggtt *ggtt, u64 size)
 
 	/* For Modern GENs the PTEs and register space are split in the BAR */
 	phys_addr = pci_resource_start(pdev, 0) + pci_resource_len(pdev, 0) / 2;
+	ggtt->gsm_paddr = phys_addr;
 
 	/*
 	 * On BXT+/CNL+ writes larger than 64 bit to the GTT pagetable range
