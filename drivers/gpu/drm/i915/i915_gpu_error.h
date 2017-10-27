@@ -138,7 +138,12 @@ struct i915_gpu_state {
 			u32 tiling:2;
 			int page_count;
 			int unused;
-			u32 *pages[0];
+			struct drm_i915_error_page {
+				phys_addr_t pte_paddr;
+				gen8_pte_t pte;
+				phys_addr_t paddr;
+				u32 *storage;
+			} pages[0];
 		} *ringbuffer, *batchbuffer, *wa_batchbuffer, *ctx, *hws_page;
 
 		struct drm_i915_error_object **user_bo;

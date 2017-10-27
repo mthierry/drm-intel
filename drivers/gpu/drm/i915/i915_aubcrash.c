@@ -209,6 +209,52 @@ void i915_error_free_ppgtt(struct i915_gpu_state *error, int idx)
 	free_page((unsigned long)e_pml4->storage);
 }
 
+void i915_error_page_walk(struct i915_address_space *vm,
+			  u64 offset,
+			  gen8_pte_t *entry,
+			  phys_addr_t *paddr)
+{
+	if (i915_is_ggtt(vm)) {
+		struct i915_ggtt *ggtt = i915_vm_to_ggtt(vm);
+		uint index = offset >> PAGE_SHIFT;
+
+		gen8_pte_t __iomem *pte =
+			(gen8_pte_t __iomem *)ggtt->gsm + index;
+
+		*entry = readq(pte);
+		*paddr = ggtt->gsm_paddr + index * sizeof(u64);
+	} else {
+		struct i915_hw_ppgtt *ppgtt = i915_vm_to_ppgtt(vm);
+		struct i915_pml4 *pml4;
+		struct i915_page_directory_pointer *pdp;
+		struct i915_page_directory *pd;
+		struct i915_page_table *pt;
+		u32 pml4e, pdpe, pde, pte;
+		u64 *vaddr;
+
+		pml4e = gen8_pml4e_index(offset);
+		if (i915_vm_is_48bit(&ppgtt->vm)) {
+			pml4 = &ppgtt->pml4;
+			pdp = pml4->pdps[pml4e];
+		} else {
+			GEM_BUG_ON(pml4e != 0);
+			pdp = &ppgtt->pdp;
+		}
+
+		pdpe = gen8_pdpe_index(offset);
+		pd = pdp->page_directory[pdpe];
+
+		pde = gen8_pde_index(offset);
+		pt = pd->page_table[pde];
+
+		pte = gen8_pte_index(offset);
+		vaddr = kmap_atomic(px_base(pt)->page);
+		*entry = vaddr[pte];
+		kunmap_atomic(vaddr);
+		*paddr = px_dma(pt) + pte * sizeof(u64);
+	}
+}
+
 int i915_error_state_to_aub(struct drm_i915_error_state_buf *m,
 			    const struct i915_gpu_state *error)
 {

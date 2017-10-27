@@ -206,7 +206,7 @@ i915_error_printer(struct drm_i915_error_state_buf *e)
 	return p;
 }
 
-#ifdef CONFIG_DRM_I915_COMPRESS_ERROR
+#if defined(CONFIG_DRM_I915_COMPRESS_ERROR) && !defined(CONFIG_DRM_I915_AUB_CRASH_DUMP)
 
 struct compress {
 	struct z_stream_s zstream;
@@ -254,7 +254,7 @@ static int compress_page(struct compress *c,
 			if (!page)
 				return -ENOMEM;
 
-			dst->pages[dst->page_count++] = (void *)page;
+			dst->pages[dst->page_count++].storage = (void *)page;
 
 			zstream->next_out = (void *)page;
 			zstream->avail_out = PAGE_SIZE;
@@ -317,7 +317,7 @@ static int compress_page(struct compress *c,
 	ptr = (void *)page;
 	if (!i915_memcpy_from_wc(ptr, src, PAGE_SIZE))
 		memcpy(ptr, src, PAGE_SIZE);
-	dst->pages[dst->page_count++] = ptr;
+	dst->pages[dst->page_count++].storage = ptr;
 
 	return 0;
 }
@@ -572,7 +572,7 @@ static void print_error_obj(struct drm_i915_error_state_buf *m,
 		len = ascii85_encode_len(len);
 
 		for (i = 0; i < len; i++) {
-			if (ascii85_encode(obj->pages[page][i], out))
+			if (ascii85_encode(obj->pages[page].storage[i], out))
 				err_puts(m, out);
 			else
 				err_puts(m, "z");
@@ -871,7 +871,7 @@ static void i915_error_object_free(struct drm_i915_error_object *obj)
 		return;
 
 	for (page = 0; page < obj->page_count; page++)
-		free_page((unsigned long)obj->pages[page]);
+		free_page((unsigned long)obj->pages[page].storage);
 
 	kfree(obj);
 }
@@ -956,7 +956,7 @@ i915_error_object_create(struct drm_i915_private *i915,
 
 	num_pages = min_t(u64, vma->size, vma->obj->base.size) >> PAGE_SHIFT;
 	num_pages = DIV_ROUND_UP(10 * num_pages, 8); /* worstcase zlib growth */
-	dst = kmalloc(sizeof(*dst) + num_pages * sizeof(u32 *),
+	dst = kmalloc(sizeof(*dst) + num_pages * sizeof(*dst->pages),
 		      GFP_ATOMIC | __GFP_NOWARN);
 	if (!dst)
 		return NULL;
@@ -978,6 +978,14 @@ i915_error_object_create(struct drm_i915_private *i915,
 
 		ggtt->vm.insert_page(&ggtt->vm, dma, slot, I915_CACHE_NONE, 0);
 
+		if (INTEL_GEN(i915) >= 8) {
+			dst->pages[dst->page_count].paddr = dma;
+			i915_error_page_walk(vma->vm, dst->gtt_offset +
+					     dst->page_count * PAGE_SIZE,
+					     &dst->pages[dst->page_count].pte,
+					     &dst->pages[dst->page_count].pte_paddr);
+		}
+
 		s = io_mapping_map_atomic_wc(&ggtt->iomap, slot);
 		ret = compress_page(&compress, (void  __force *)s, dst);
 		io_mapping_unmap_atomic(s);
@@ -989,7 +997,7 @@ i915_error_object_create(struct drm_i915_private *i915,
 
 unwind:
 	while (dst->page_count--)
-		free_page((unsigned long)dst->pages[dst->page_count]);
+		free_page((unsigned long)dst->pages[dst->page_count].storage);
 	kfree(dst);
 	dst = NULL;
 
