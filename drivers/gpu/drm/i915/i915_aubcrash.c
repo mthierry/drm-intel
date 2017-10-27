@@ -27,6 +27,7 @@
 
 #include "intel_drv.h"
 #include "i915_aubcrash.h"
+#include "i915_aubmemtrace.h"
 
 /**
  * DOC: AubCrash
@@ -255,8 +256,182 @@ void i915_error_page_walk(struct i915_address_space *vm,
 	}
 }
 
+#ifdef CONFIG_DRM_I915_COMPRESS_ERROR
+
+void write_aub(void *priv, const void *data, size_t len)
+{
+	struct drm_i915_error_state_buf *e = priv;
+
+	/* TODO: Compress the AUB file on the go */
+	i915_error_binary_write(e, data, len);
+}
+
+#else
+
+void write_aub(void *priv, const void *data, size_t len)
+{
+	struct drm_i915_error_state_buf *e = priv;
+
+	i915_error_binary_write(e, data, len);
+}
+
+#endif
+
+#define AUB_COMMENT_ERROR_OBJ(name, obj) do { \
+	i915_aub_comment(aub, name " (%08x_%08x %8u)", \
+			 upper_32_bits((obj)->gtt_offset), \
+			 lower_32_bits((obj)->gtt_offset), \
+			 (obj)->gtt_size); \
+} while (0)
+
 int i915_error_state_to_aub(struct drm_i915_error_state_buf *m,
 			    const struct i915_gpu_state *error)
 {
+	struct drm_i915_private *dev_priv = m->i915;
+	struct intel_aub *aub;
+	int i;
+
+	aub = i915_aub_start(dev_priv, write_aub, (void *)m, "AubCrash", true);
+	if (IS_ERR(aub))
+		return PTR_ERR(aub);
+
+	if (!error) {
+		i915_aub_comment(aub, "No error state collected\n");
+		return 0;
+	}
+
+	i915_aub_comment(aub, "Registers");
+	i915_aub_register(aub, GAM_ECOCHK, error->gam_ecochk);
+	for (i = 0; i < ARRAY_SIZE(error->engine); i++) {
+		const struct drm_i915_error_engine *ee = &error->engine[i];
+		struct intel_engine_cs *engine = dev_priv->engine[i];
+
+		if (!ee->batchbuffer)
+			continue;
+
+		i915_aub_register(aub, RING_MODE_GEN7(engine),
+				  _MASKED_BIT_ENABLE(ee->vm_info.gfx_mode));
+		i915_aub_register(aub, RING_HWS_PGA(engine->mmio_base),
+				  ee->hws);
+	}
+
+	i915_aub_comment(aub, "PPGTT PML4/PDP/PD");
+	for (i = 0; i < ARRAY_SIZE(error->active_vm); i++) {
+		const struct drm_i915_error_pagemap_lvl *pml4 =
+			&error->ppgtt_pml4[i];
+		int l3, l2;
+
+		if (!error->active_vm[i])
+			break;
+
+		if (pml4->storage)
+			i915_aub_gtt(aub, PPGTT_LEVEL4, pml4->paddr,
+				     pml4->storage, GEN8_PML4ES_PER_PML4);
+
+		for (l3 = 0; l3 < pml4->nxt_lvl_count; l3++) {
+			const struct drm_i915_error_pagemap_lvl *pdp =
+				&pml4->nxt_lvl[l3];
+
+			if (pdp->storage)
+				i915_aub_gtt(aub, PPGTT_LEVEL3, pdp->paddr,
+					     pdp->storage, GEN8_4LVL_PDPES);
+
+			for (l2 = 0; l2 < pdp->nxt_lvl_count; l2++) {
+				const struct drm_i915_error_pagemap_lvl *pd =
+					&pdp->nxt_lvl[l2];
+
+				i915_aub_gtt(aub, PPGTT_LEVEL2, pd->paddr,
+					     pd->storage, I915_PDES);
+			}
+		}
+	}
+
+	/* Active request */
+	for (i = 0; i < ARRAY_SIZE(error->engine); i++) {
+		const struct drm_i915_error_engine *ee = &error->engine[i];
+		struct intel_engine_cs *engine = dev_priv->engine[i];
+		int j;
+
+		if (!ee->batchbuffer)
+			continue;
+
+		i915_aub_comment(aub, "Engine %s", engine->name);
+
+		if (ee->hws_page) {
+			AUB_COMMENT_ERROR_OBJ("Hardware Status Page",
+					      ee->hws_page);
+			i915_aub_buffer(aub, true, ee->hws_page->tiling,
+					ee->hws_page->pages,
+					ee->hws_page->page_count);
+		}
+
+		if (ee->ctx) {
+			u64 gtt_offset =
+				ee->ctx->gtt_offset + LRC_GUCSHR_SZ * PAGE_SIZE;
+			u64 gtt_size =
+				ee->ctx->gtt_size - LRC_GUCSHR_SZ * PAGE_SIZE;
+
+			i915_aub_comment(aub,
+					 "Logical Ring Context (%08x_%08x %8u)",
+					 upper_32_bits(gtt_offset),
+					 lower_32_bits(gtt_offset),
+					 gtt_size);
+			i915_aub_context(aub, engine->class,
+					 ee->ctx->pages + LRC_GUCSHR_SZ,
+					 ee->ctx->page_count - LRC_GUCSHR_SZ);
+		}
+#if 0
+		if (ee->renderstate) {
+			AUB_COMMENT_ERROR_OBJ("Renderstate", ee->renderstate);
+			i915_aub_batchbuffer(aub, true, ee->renderstate->pages,
+					     ee->renderstate->page_count);
+		}
+#endif
+
+		if (ee->wa_batchbuffer) {
+			AUB_COMMENT_ERROR_OBJ("Scratch", ee->wa_batchbuffer);
+			i915_aub_buffer(aub, true, I915_TILING_NONE,
+					ee->wa_batchbuffer->pages,
+					ee->wa_batchbuffer->page_count);
+		}
+
+		if (ee->wa_ctx) {
+			AUB_COMMENT_ERROR_OBJ("WA context", ee->wa_ctx);
+			i915_aub_batchbuffer(aub, true, ee->wa_ctx->pages,
+					     ee->wa_ctx->page_count);
+		}
+
+		if (ee->ringbuffer) {
+			AUB_COMMENT_ERROR_OBJ("Ringbuffer", ee->ringbuffer);
+			i915_aub_batchbuffer(aub, true, ee->ringbuffer->pages,
+					     ee->ringbuffer->page_count);
+		}
+
+		if (ee->batchbuffer) {
+			AUB_COMMENT_ERROR_OBJ("Batchbuffer", ee->batchbuffer);
+			i915_aub_batchbuffer(aub, false, ee->batchbuffer->pages,
+					     ee->batchbuffer->page_count);
+		}
+
+		for (j = 0; j < ee->user_bo_count; j++) {
+			struct drm_i915_error_object *obj = ee->user_bo[j];
+
+			AUB_COMMENT_ERROR_OBJ("BO", obj);
+			i915_aub_buffer(aub, false, obj->tiling,
+					obj->pages, obj->page_count);
+		}
+
+		/* XXX: Do I want to overwrite the head/tail inside the lrc? */
+		i915_aub_comment(aub, "ELSP submissions");
+		for (j = 0; j < ee->num_requests; j++)
+			i915_aub_elsp_submit(aub, engine,
+					     ee->requests[j].lrc_desc);
+	}
+
+	i915_aub_stop(aub);
+
+	if (m->bytes == 0 && m->err)
+		return m->err;
+
 	return 0;
 }
