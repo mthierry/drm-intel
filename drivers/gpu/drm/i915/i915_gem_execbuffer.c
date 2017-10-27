@@ -38,6 +38,7 @@
 #include "i915_drv.h"
 #include "i915_gem_clflush.h"
 #include "i915_trace.h"
+#include "i915_aubcrash.h"
 #include "intel_drv.h"
 #include "intel_frontbuffer.h"
 
@@ -1782,7 +1783,8 @@ static int eb_move_to_gpu(struct i915_execbuffer *eb)
 		struct i915_vma *vma = eb->vma[i];
 		struct drm_i915_gem_object *obj = vma->obj;
 
-		if (flags & EXEC_OBJECT_CAPTURE) {
+		if ((flags & EXEC_OBJECT_CAPTURE) ||
+		    i915_error_state_should_capture(vma, eb->batch)) {
 			struct i915_capture_list *capture;
 
 			capture = kmalloc(sizeof(*capture), GFP_KERNEL);

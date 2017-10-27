@@ -37,6 +37,12 @@ void i915_error_page_walk(struct i915_address_space *vm,
 int i915_error_state_to_aub(struct drm_i915_error_state_buf *m,
                             const struct i915_gpu_state *error);
 
+static inline bool i915_error_state_should_capture(struct i915_vma *vma,
+						   struct i915_vma *batch)
+{
+	return ((INTEL_GEN(vma->vm->i915) >= 8) && (vma != batch));
+}
+
 #else
 
 static inline void i915_error_record_ppgtt(struct i915_gpu_state *error,
@@ -60,6 +66,12 @@ static inline int i915_error_state_to_aub(struct drm_i915_error_state_buf *m,
 					  const struct i915_gpu_state *error)
 {
 	return 0;
+}
+
+static inline bool i915_error_state_should_capture(struct i915_vma *vma,
+						   struct i915_vma *batch)
+{
+	return false;
 }
 
 #endif
