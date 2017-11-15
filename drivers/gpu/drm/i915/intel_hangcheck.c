@@ -486,4 +486,5 @@ void intel_hangcheck_init(struct drm_i915_private *i915)
 
 #if IS_ENABLED(CONFIG_DRM_I915_SELFTEST)
 #include "selftests/intel_hangcheck.c"
+#include "selftests/intel_shit.c"
 #endif
