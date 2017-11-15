@@ -2077,6 +2077,8 @@ int i915_reset_engine(struct intel_engine_cs *engine, const char *msg)
 
 out:
 	i915_gem_reset_finish_engine(engine);
+	if (ret != 0)
+		DRM_ERROR("ret = %d\n", ret);
 	return ret;
 }
 
