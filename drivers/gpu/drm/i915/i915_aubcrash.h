@@ -30,7 +30,8 @@ void i915_error_record_ppgtt(struct i915_gpu_state *error,
 			     struct i915_address_space *vm,
 			     int idx);
 void i915_error_free_ppgtt(struct i915_gpu_state *error, int idx);
-void i915_error_page_walk(struct i915_address_space *vm,
+void i915_error_page_walk(struct drm_i915_private *i915,
+			  struct i915_address_space *vm,
 			  u64 offset,
 			  gen8_pte_t *entry,
 			  phys_addr_t *paddr);
@@ -55,7 +56,8 @@ static inline void i915_error_free_ppgtt(struct i915_gpu_state *error, int idx)
 {
 }
 
-static inline void i915_error_page_walk(struct i915_address_space *vm,
+static inline void i915_error_page_walk(struct drm_i915_private *i915,
+					struct i915_address_space *vm,
 					u64 offset,
 					gen8_pte_t *entry,
 					phys_addr_t *paddr)

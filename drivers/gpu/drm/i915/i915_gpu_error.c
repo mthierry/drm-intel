@@ -939,6 +939,17 @@ void __i915_gpu_state_free(struct kref *error_ref)
 	kfree(error);
 }
 
+static bool is_fake_vma(struct i915_vma *vma)
+{
+	if (vma->vm)
+		return false;
+	if (vma->node.start != U64_MAX)
+		return false;
+
+	DRM_NOTE("fake vma!\n");
+	return true;
+}
+
 static struct drm_i915_error_object *
 i915_error_object_create(struct drm_i915_private *i915,
 			 struct i915_vma *vma)
@@ -978,9 +989,9 @@ i915_error_object_create(struct drm_i915_private *i915,
 
 		ggtt->vm.insert_page(&ggtt->vm, dma, slot, I915_CACHE_NONE, 0);
 
-		if (INTEL_GEN(i915) >= 8) {
+		if (INTEL_GEN(i915) >= 8 && !is_fake_vma(vma)) {
 			dst->pages[dst->page_count].paddr = dma;
-			i915_error_page_walk(vma->vm, dst->gtt_offset +
+			i915_error_page_walk(i915, vma->vm, dst->gtt_offset +
 					     dst->page_count * PAGE_SIZE,
 					     &dst->pages[dst->page_count].pte,
 					     &dst->pages[dst->page_count].pte_paddr);
