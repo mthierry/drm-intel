@@ -446,7 +446,8 @@ static void i915_hangcheck_elapsed(struct work_struct *work)
 		hangcheck_accumulate_sample(engine, &hc);
 		hangcheck_store_sample(engine, &hc);
 
-		if (engine->hangcheck.stalled) {
+		if (engine->hangcheck.stalled ||
+		    engine->hangcheck.watchdog == intel_engine_get_seqno(engine)) {
 			hung |= intel_engine_flag(engine);
 			if (hc.action != ENGINE_DEAD)
 				stuck |= intel_engine_flag(engine);
