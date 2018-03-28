@@ -938,7 +938,7 @@ static int intel_ddi_hdmi_level(struct drm_i915_private *dev_priv, enum port por
 		intel_ddi_get_buf_trans_hdmi(dev_priv, &n_entries);
 		default_entry = 6;
 	} else {
-		WARN(1, "ddi translation table missing\n");
+		WARN_ONCE(1, "ddi translation table missing\n");
 		return 0;
 	}
 
