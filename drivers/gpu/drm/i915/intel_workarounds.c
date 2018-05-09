@@ -583,6 +583,34 @@ int intel_ctx_workarounds_emit(struct i915_request *rq)
 	return 0;
 }
 
+/*
+ * When writing to GEN8_L3SQCREG1, first must disable DOP clock gating
+ * and include a 100-clock delay before and after the L3SQ change.
+ * See the definition of L3SQCREG1 in BSpec.
+ */
+void gen8_set_l3sqc_credits(struct drm_i915_private *dev_priv,
+			    int general_prio_credits,
+			    int high_prio_credits)
+{
+	u32 misccpctl;
+	u32 val;
+
+	/* WaTempDisableDOPClkGating:bdw,chv,bxt,glk */
+	misccpctl = I915_READ(GEN7_MISCCPCTL);
+	I915_WRITE(GEN7_MISCCPCTL, misccpctl & ~GEN7_DOP_CLOCK_GATE_ENABLE);
+	udelay(1);
+
+	val = I915_READ(GEN8_L3SQCREG1);
+	val &= ~L3_PRIO_CREDITS_MASK;
+	val |= L3_GENERAL_PRIO_CREDITS(general_prio_credits);
+	val |= L3_HIGH_PRIO_CREDITS(high_prio_credits);
+	I915_WRITE(GEN8_L3SQCREG1, val);
+
+	POSTING_READ(GEN8_L3SQCREG1);
+	udelay(1);
+	I915_WRITE(GEN7_MISCCPCTL, misccpctl);
+}
+
 static void bdw_gt_workarounds_apply(struct drm_i915_private *dev_priv)
 {
 }
@@ -623,13 +651,8 @@ static void gen9_gt_workarounds_apply(struct drm_i915_private *dev_priv)
 		   BDW_DISABLE_HDC_INVALIDATION);
 
 	/* WaProgramL3SqcReg1DefaultForPerf:bxt,glk */
-	if (IS_GEN9_LP(dev_priv)) {
-		u32 val = I915_READ(GEN8_L3SQCREG1);
-
-		val &= ~L3_PRIO_CREDITS_MASK;
-		val |= L3_GENERAL_PRIO_CREDITS(62) | L3_HIGH_PRIO_CREDITS(2);
-		I915_WRITE(GEN8_L3SQCREG1, val);
-	}
+	if (IS_GEN9_LP(dev_priv))
+		gen8_set_l3sqc_credits(dev_priv, 62, 2);
 
 	/* WaOCLCoherentLineFlush:skl,bxt,kbl,cfl */
 	I915_WRITE(GEN8_L3SQCREG4,

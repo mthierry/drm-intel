@@ -29,6 +29,7 @@
 #include <drm/drm_plane_helper.h>
 #include "i915_drv.h"
 #include "intel_drv.h"
+#include "intel_workarounds.h"
 #include "../../../platform/x86/intel_ips.h"
 #include <linux/module.h>
 #include <drm/drm_atomic_helper.h>
@@ -8627,32 +8628,6 @@ static void lpt_suspend_hw(struct drm_i915_private *dev_priv)
 		val &= ~PCH_LP_PARTITION_LEVEL_DISABLE;
 		I915_WRITE(SOUTH_DSPCLK_GATE_D, val);
 	}
-}
-
-static void gen8_set_l3sqc_credits(struct drm_i915_private *dev_priv,
-				   int general_prio_credits,
-				   int high_prio_credits)
-{
-	u32 misccpctl;
-	u32 val;
-
-	/* WaTempDisableDOPClkGating:bdw */
-	misccpctl = I915_READ(GEN7_MISCCPCTL);
-	I915_WRITE(GEN7_MISCCPCTL, misccpctl & ~GEN7_DOP_CLOCK_GATE_ENABLE);
-
-	val = I915_READ(GEN8_L3SQCREG1);
-	val &= ~L3_PRIO_CREDITS_MASK;
-	val |= L3_GENERAL_PRIO_CREDITS(general_prio_credits);
-	val |= L3_HIGH_PRIO_CREDITS(high_prio_credits);
-	I915_WRITE(GEN8_L3SQCREG1, val);
-
-	/*
-	 * Wait at least 100 clocks before re-enabling clock gating.
-	 * See the definition of L3SQCREG1 in BSpec.
-	 */
-	POSTING_READ(GEN8_L3SQCREG1);
-	udelay(1);
-	I915_WRITE(GEN7_MISCCPCTL, misccpctl);
 }
 
 static void icl_init_clock_gating(struct drm_i915_private *dev_priv)
